@@ -48,6 +48,49 @@ class ChicagoMultiPolicyMap(Env):
         self.desc = 0 # MAP
 
 
+    def Mapping(self):
+
+        =
+        """
+        Data format
+        obj1 (boundary), obj2 (landuse), obj4 (transmission): numpy matrix 
+        obj3 (existing charging infra), obj5 (traffic volume), obj6 (potential electricity): gdf 
+        oj1_2 (boundary), obj2_2 (landuse), obj4_2 (transmission): gdf
+
+        obj1, obj2, obj4 do not need to convert it into numpy matrix.
+        obj3, obj5, obj6 do need to convert it into numpy matrix.
+
+        obj1_2, will use it on storing and managing the locations of potential fast charging stations to define the distribution probability of starting locations
+
+        --- Updated MAP format (10/28/2024) ---
+        We create 2 types of MAP: i) main MAP for environment, and ii) sub MAP for record & visualization of output in the render mode.
+
+        i) Main MAP
+        There are two layers in the main MAP: i_1) Quantified information (e.g., VMT), and i_2) location information (e.g., -4 of PVs in (2000, 2000)).
+        
+        We use only the first layer of the main MAP in training the model as 2D array, which can be trained by CNN networks. 
+        
+        The second layer of the main MAP is only used to compute the reward function, such as be to calculate the distance between power lines and potential CS location. 
+         
+        main_MAP = ( , ,2) -> state = ( , ,0) = ( , )
+        Vehicle Mileage Traffic (charging demand) = [VMT, -1]
+        main road = [-2, -2]
+        powerline = [-3, -3]
+        PV_potential electricity = [potential electricity generation, -4]
+        Potential EVCSs = [capacities, -5]
+        
+        ii) Sub MAP
+        The sub MAP is for constraining the conditions of the installation of EVCSs, cannot be installed in un-available land-use, for figuring out the starting point by the boundary map,
+        and for storing the selected potential EVCSs' location information and capacities. 
+        
+        There are three layers in the sub MAP: ii_1) land-use with available or non-available, ii_2) boundary of communities (1 - 76), and ii_3) potential EVCSs.  
+        
+        sub_MAP = ( , ) same size with main_MAP
+        1 layer: landuse = [non-available/available] non-available = -1, available = +1
+        2 layer: boundary = [community code] 1 ~ 76
+        3 layer: potential EVCSs [capacities] 
+               : Existing EVCSs [location info=-1]
+        """
     def step(self, action, factor):
 
         action_group = action[0:2]
@@ -86,7 +129,10 @@ class ChicagoMultiPolicyMap(Env):
             if Alpha == 1:
                 r_dg = 1
             else:
-
+                PowerLine_info = np.argwhere()
 
             R_u = r_drn + r_dg + r_lu + r_sc
+
+        elif factor == 'all':
+
 
