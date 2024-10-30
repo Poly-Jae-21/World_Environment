@@ -1,7 +1,12 @@
 from gym import Env
 import numpy as np
+from pyogrio import read_dataframe
 from typing_extensions import Optional
 import math
+import gemgis as gg
+
+from utils.data_conversion import Polygon_to_matrix
+
 
 def generate_map():
     MAP = np.zeros(shape=(Matrix_y_size + 1, Matrix_x_size + 1, 4))
@@ -46,6 +51,38 @@ class ChicagoMultiPolicyMap(Env):
 
     def __init__(self, render_mode: Optional[str] = None):
         self.desc = 0 # MAP
+
+
+    def Chicago_data(self):
+        PtM = Polygon_to_matrix()
+        # Import The landuse data (matrix format) and convert it into numpy format for sub_MAP
+        read_landuse_data = read_dataframe('envs/data/landuse_map/Landuse2018_Dissolve_Pr_Clip.shp')
+        landuse_numpy, landuse_minX, landuse_maxX, landuse_minY, landuse_maxY = PtM.transform_data_landuse(read_landuse_data)
+
+        # Import the community boundary map data (matrix format) and convert it into numpy format for sub_MAP
+        read_community_boundary_data = read_dataframe('envs/data/community_boundary_map/geo_export_b5a56d3a9_Project.shp')
+        boundary_numpy, boundary_minX, boundary_maxX, boundary_minY, boundary_maxY = PtM.transform_data_community_boundary(read_community_boundary_data)
+
+        # Existing charging infrastructure locations data (shape file) -> only used in test
+        existing_charging_infra = read_dataframe('envs/data/existing_infrastructure_map/alt_fuel_stationsSep_Pr_Clip1.shp')
+        existing_charging_infra = gg.vector.extract_xy(existing_charging_infra)
+        existing_charging_infra.X, existing_charging_infra.Y = np.trunc(existing_charging_infra.X / 10), np.trunc(existing_charging_infra.Y / 10)
+
+        # Traffic AADT data -> Vehicle miles traveled (VMT) data (Point data) ##  AADT * foot * 0.000189394 = VMT
+        VMT_data = read_dataframe('envs/data/VMT_point_map/Average_Annual_FeatureToPoin3.shp')
+        VMT_data = gg.vector.extract_xy(VMT_data)
+        VMT_data.X, VMT_data.Y = np.trunc(VMT_data.X / 10), np.trunc(VMT_data.Y / 10)
+        VMT_lower, VMT_upper = np.percentile(VMT_data["VMT_mile"], 25, method='midpoint'), np.percentile(VMT_data["VMT_mile"], 75, method='midpoint')
+        IQR = VMT_upper - VMT_lower
+        VMT_upper_outlier, VMT_lower_outlier = VMT_upper + 1.5 * IQR, VMT_lower - 1.5 * IQR
+        VMT_upper_array = VMT_data.index[(VMT_data["VMT_mile"] >= VMT_upper_outlier)]
+        VMT_lower_array = VMT_data.index[(VMT_data["VMT_mile"] <= VMT_lower_outlier)]
+        VMT_data = VMT_data.drop(VMT_upper_array, axis=0)
+        VMT_data = VMT_data.drop(VMT_lower_array, axis=0)
+        VMT_data["VMT_mile"] = VMT_data["VMT_mile"] / 2 # Consider the share of EV sales in estimating charging demand through traffic count data: 50% target goal of U.S. in 2030
+        VMT_data["VMT_mile"] = VMT_data["VMT_mile"] * 0.28 # Consider the probability of visiting a charging station based on the traffic flow, 28% assumed by Liu et al. 2023 paper
+
+
 
 
     def Mapping(self):

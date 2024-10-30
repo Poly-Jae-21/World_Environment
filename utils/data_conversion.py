@@ -50,7 +50,7 @@ class Polygon_to_matrix():
         # Step 4: Convert the raster to a NumPy array
         numpy_array = np.array(raster)
 
-        return numpy_array, gdf, x_min, y_min, x_max, y_max
+        return numpy_array, x_min, y_min, x_max, y_max
 
     def transform_data_community_boundary(self, gdf):
         if 'area_numbe' not in gdf.columns:
@@ -74,7 +74,7 @@ class Polygon_to_matrix():
 
         numpy_array = np.array(raster)
 
-        return numpy_array, gdf, x_min, y_min, x_max, y_max
+        return numpy_array, x_min, y_min, x_max, y_max
 
     def transform_data_transmission(self, gdf):
 
