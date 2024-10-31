@@ -1,7 +1,10 @@
-import gymnasium as gym
-from gymnasium.envs.toy_text.frozen_lake import generate_random_map
+import numpy as np
 
-env = gym.make("FrozenLake-v1", desc=generate_random_map(size=8))
+MAP = np.ones(shape=(1 + 1, 1 + 1, 2))
 
-observation, info = env.reset(seed=42)
-print(env.observation_space)
+New_MAP = np.ones(shape=(2,2))
+New_MAP = New_MAP + 1
+
+MAP[:,:,0] = New_MAP
+print(MAP)
+
