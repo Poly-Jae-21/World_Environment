@@ -6,7 +6,7 @@ import math
 import gemgis as gg
 import random
 
-from utils.data_conversion import Polygon_to_matrix
+from utils.data_conversion import Polygon_to_matrix, Density
 
 def generate_partial_observation(agent_position, MAP):
     p_observation_map = MAP[-50 + agent_position[0]: 50 + agent_position[0], -50 + agent_position[1]: 50 + agent_position[1],0]
@@ -51,7 +51,6 @@ class ChicagoMultiPolicyMap(Env):
         self.sub_MAP = None
         self.episode = 0
         self.probability_list = [] ## This is for the starting point distribution probability. It can be updated over episodes after 32 self.episode
-
 
     def Chicago_data(self):
         PtM = Polygon_to_matrix()
@@ -161,7 +160,9 @@ class ChicagoMultiPolicyMap(Env):
         """
 
         self.boundary_x, self.boundary_y = int(self.max_x - self.min_x), int(self.max_y - self.min_y)
-
+        obj1['centroid_x'], obj1['centroid_y'] = obj1['centroid_x'] - self.min_x, obj1['centroid_y'] - self.min_y
+        self.Den = Density(obj1['centroid_x'], obj1['centroid_y'])
+        self.radius = self.Den.average_radius()
         MAP = np.zeros(shape=(self.boundary_y + 1, self.boundary_x + 1, 2))
         sub_MAP = np.zeros(shape=(self.boundary_y + 1, self.boundary_x + 1, 4))
 
@@ -247,7 +248,8 @@ class ChicagoMultiPolicyMap(Env):
             return selected_medium_position, medium_observation
 
         else:
-            updated_weight_list = 1 / (np.exp(self.probability_list) + 77) ## 77 = The number of community areas in Chicago
+            Density_weight = self.Den.KernelDensity(self.radius, self.sub_MAP)
+            updated_weight_list = 1 / (np.exp(Density_weight) + 77) ## 77 = The number of community areas in Chicago
             self.probability_list = updated_weight_list / np.sum(updated_weight_list)
 
             selected_community = random.choices(population=[i+1 for i in range(77)], weights=self.probability_list, k=1)

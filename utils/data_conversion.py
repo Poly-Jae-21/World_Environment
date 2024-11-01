@@ -140,3 +140,38 @@ class Polygon_to_matrix():
         csv_path = 'env/utils/output_matrix_v5.csv'
         np.savetxt(csv_path, numpy_array, delimiter=",", fmt='%d')
 
+class Density():
+    def __init__(self, centroid_x, centroid_y):
+        self.c = np.array([[x_val, y_val] for x_val, y_val in zip(centroid_x, centroid_y)])
+        self.len_x = len(centroid_x)
+        self.len_y = len(centroid_y)
+    def average_radius(self):
+
+        # Calculate pairwise Euclidean distances
+        distances = np.sqrt(((self.c[:, np.newaxis] - self.c) ** 2).sum(axis=2))
+
+        # Get average distance (excluding zero distances on the diagonal) = average_radius
+        radius = np.sum(distances) / (self.len_x * (self.len_y - 1))
+
+        return radius
+
+    def KernelDensity(self, radius, sub_map):
+        densitys = []
+        for i in range(len(self.c)):
+            gaussian_kernels = []
+            action_records = np.argwhere(sub_map[1] != 0)
+            for j in range(len(action_records)):
+                dist_i_j = np.linalg.norm(self.c[i] - action_records[j])
+                if dist_i_j <= radius:
+                    ii = 1
+                    gaussian_kernel = (1 / np.roots((2 * np.pi))) * (-1)**(-ii)*(1-(dist_i_j / radius)**2)**2
+                    gaussian_kernels.append(gaussian_kernel)
+                else:
+                    ii = 0
+                    gaussian_kernel =0
+
+            density_i = (1 / radius ** 2) * np.sum(gaussian_kernels)
+            densitys.append(density_i)
+
+        return densitys
+
