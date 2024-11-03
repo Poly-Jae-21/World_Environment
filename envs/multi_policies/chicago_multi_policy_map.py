@@ -6,6 +6,7 @@ import math
 import gemgis as gg
 import random
 
+from utils.action import Action
 from utils.data_conversion import Polygon_to_matrix, Density
 
 def generate_partial_observation(agent_position, MAP):
@@ -47,10 +48,15 @@ class ChicagoMultiPolicyMap(Env):
     }
 
     def __init__(self, render_mode: Optional[str] = None):
+        self.time_step = 0
         self.main_MAP = None
         self.sub_MAP = None
         self.episode = 0
+        self.position_record = []
+        self.capacity_record = [0]
+        self.action_record = np.array([[0,0,0]])
         self.probability_list = [] ## This is for the starting point distribution probability. It can be updated over episodes after 32 self.episode
+        self.max_steps = 100
 
     def Chicago_data(self):
         PtM = Polygon_to_matrix()
@@ -61,6 +67,11 @@ class ChicagoMultiPolicyMap(Env):
         # Import the community boundary map data (matrix format) and convert it into numpy format for sub_MAP
         read_community_boundary_data = read_dataframe('envs/data/community_boundary_map/geo_export_b5a56d3a9_Project.shp')
         boundary_numpy, boundary_minX, boundary_maxX, boundary_minY, boundary_maxY = PtM.transform_data_community_boundary(read_community_boundary_data)
+
+        # Import the vegetation map data (matrix format) and convert it into numpy format for sub_MAP
+        read_vegetation_data = read_dataframe('envs/data/vegetation_map/SevenCensusWCommunit_Pr_Clip.shp')
+        vegetation_numpy, vegetation_minX, vegetation_maxX, vegetation_minY, vegetation_maxY = PtM.transform_data_vegetation(read_vegetation_data)
+        self.vegetation_percentage_max = np.max(vegetation_numpy)
 
         # Import the main road map data (shape file)
         read_main_road_data = read_dataframe('envs/data/road_map/geo_export_90a38541d_Pr_Clip.shp')
@@ -83,7 +94,6 @@ class ChicagoMultiPolicyMap(Env):
         VMT_data = VMT_data.drop(VMT_upper_array, axis=0)
         VMT_data = VMT_data.drop(VMT_lower_array, axis=0)
         VMT_data["VMT_mile"] = VMT_data["VMT_mile"] / 2 # Consider the share of EV sales in estimating charging demand through traffic count data: 50% target goal of U.S. in 2030
-        VMT_data["VMT_mile"] = VMT_data["VMT_mile"] * 0.28 # Consider the probability of visiting a charging station based on the traffic flow, 28% assumed by Liu et al. 2023 paper
 
         # Power Grid location data (Polyline format)
         read_PowerGrid_line_data = read_dataframe('envs/data/transmission_line_map/geo_export_d59_Polyg_Pr_Clip.shp')
@@ -105,28 +115,28 @@ class ChicagoMultiPolicyMap(Env):
         potential_electricity = potential_electricity.drop(potential_electricity_lower_array, axis=0)
 
         # raw (x, y) extent to grid coordinates ( 0 to max )
-        self.min_x = int(np.min(boundary_minX, landuse_minX, PowerGrid_line_minX, main_road_minX, int(np.min(np.concatenate(VMT_data.X, existing_charging_infra.X, potential_electricity.X), axis=0))))
-        self.max_x = int(np.min(boundary_maxX, landuse_maxX, PowerGrid_line_maxX, main_road_maxX, int(np.max(np.concatenate(VMT_data.X, existing_charging_infra.X, potential_electricity.X), axis=0))))
-        self.min_y = int(np.min(boundary_minY, landuse_minY, PowerGrid_line_minY, main_road_minY, int(np.min(np.concatenate(VMT_data.Y, existing_charging_infra.Y, potential_electricity.Y), axis=0))))
-        self.max_y = int(np.min(boundary_maxX, landuse_maxY, PowerGrid_line_maxY, main_road_maxY, int(np.max(np.concatenate(VMT_data.Y, existing_charging_infra.Y, potential_electricity.Y), axis=0))))
+        self.min_x = int(np.min(boundary_minX, landuse_minX, PowerGrid_line_minX, main_road_minX, vegetation_minX, int(np.min(np.concatenate(VMT_data.X, existing_charging_infra.X, potential_electricity.X), axis=0))))
+        self.max_x = int(np.min(boundary_maxX, landuse_maxX, PowerGrid_line_maxX, main_road_maxX, vegetation_maxX, int(np.max(np.concatenate(VMT_data.X, existing_charging_infra.X, potential_electricity.X), axis=0))))
+        self.min_y = int(np.min(boundary_minY, landuse_minY, PowerGrid_line_minY, main_road_minY, vegetation_minY, int(np.min(np.concatenate(VMT_data.Y, existing_charging_infra.Y, potential_electricity.Y), axis=0))))
+        self.max_y = int(np.min(boundary_maxX, landuse_maxY, PowerGrid_line_maxY, main_road_maxY, vegetation_maxY, int(np.max(np.concatenate(VMT_data.Y, existing_charging_infra.Y, potential_electricity.Y), axis=0))))
 
         VMT_data.X, VMT_data.Y = VMT_data.X - self.min_x, VMT_data.Y - self.min_y
         potential_electricity.X, potential_electricity.Y = potential_electricity.X - self.min_x, potential_electricity.Y - self.min_y
         existing_charging_infra.X, existing_charging_infra.Y = existing_charging_infra.X - self.min_x, existing_charging_infra.Y - self.min_y
 
 
-        return boundary_numpy, landuse_numpy, existing_charging_infra, PowerGrid_line_numpy, VMT_data, potential_electricity, main_road_numpy
+        return boundary_numpy, landuse_numpy, existing_charging_infra, PowerGrid_line_numpy, VMT_data, potential_electricity, main_road_numpy, vegetation_numpy
 
     def Mapping(self):
 
-        obj1, obj2, obj3, obj4, obj5, obj6, obj7 = self.Chicago_data()
+        obj1, obj2, obj3, obj4, obj5, obj6, obj7, obj8 = self.Chicago_data()
 
         """
         Data format
-        obj1 (boundary), obj2 (landuse), obj4 (Power Grid line), obj7 (main road): numpy matrix 
+        obj1 (boundary), obj2 (landuse), obj4 (Power Grid line), obj7 (main road), obj8 (vegetation percentage): numpy matrix 
         obj3 (existing charging infra), obj5 (traffic VMT), obj6 (potential electricity): gdf 
 
-        obj1, obj2, obj4, obj7 do not need to convert it into numpy matrix.
+        obj1, obj2, obj4, obj7, obj8 do not need to convert it into numpy matrix.
         obj3, obj5, obj6 do need to convert it into numpy matrix.
 
         --- Updated MAP format (10/28/2024) ---
@@ -153,9 +163,10 @@ class ChicagoMultiPolicyMap(Env):
         There are three layers in the sub MAP: ii_1) land-use with available or non-available, ii_2) boundary of communities (1 - 76), and ii_3) potential EVCSs.  
         
         sub_MAP = ( , ) same size with main_MAP
-        1 layer: landuse = [non-available/available] non-available = -1, available = +1
-        2 layer: boundary = [community code] 1 ~ 76
-        3 layer: potential EVCSs [capacities] 
+        1 layer: boundary = [non-available/available] non-available = -1, available = +1
+        2 layer: landuse = [community code] 1 ~ 76
+        3 layer: vegetation = the percentage of vegetation
+        4 layer: potential EVCSs [capacities] 
                : Existing EVCSs [location info=-1]
         """
 
@@ -193,18 +204,20 @@ class ChicagoMultiPolicyMap(Env):
         MAP[0] = MAP[0] + obj7_slice[:,:,0] + obj4_slice[:,:,0]
         MAP[1] = MAP[1] + obj7_slice[:,:,0] + obj4_slice[:,:,0]
 
-        obj1_slice = np.stack([obj1] * 3, axis=2)
-        obj2_slice = np.stack([obj2] * 3, axis=2)
+        obj1_slice = np.stack([obj1] * 4, axis=2)
+        obj2_slice = np.stack([obj2] * 4, axis=2)
+        obj8_slice = np.stack([obj8] * 4, axis=2)
 
         sub_MAP[0] = obj1_slice[:,:,0]
         sub_MAP[1] = obj2_slice[:,:,0]
+        sub_MAP[2] = obj8_slice[:,:,0]
 
         for ii in range(len(obj3)):
             x_val, y_val = int(obj3.iloc[ii, -2]), int(obj3.iloc[ii, -1])
             if x_val > self.max_x or x_val < self.min_x or y_val > self.max_y or y_val < self.min_y:
                 continue
             else:
-                sub_MAP[self.boundary_y - y_val, x_val - self.min_x, 3] = 1
+                sub_MAP[self.boundary_y - y_val, x_val - self.min_x, 3] = -1
         return MAP, sub_MAP
 
     def conversion_into_extent(self, action_record):
@@ -227,6 +240,8 @@ class ChicagoMultiPolicyMap(Env):
         """
         This is to create environment or set up an initial position and initial partial observation
         """
+        self.time_step = 0
+
         if self.episode == 0:
             select_community = random.randint(1,77)
             self.main_MAP, self.sub_MAP = self.Mapping()
@@ -234,6 +249,7 @@ class ChicagoMultiPolicyMap(Env):
             if initial_position_list.size > 0:
                 selected_initial_starting_point = random.choice(initial_position_list)
                 selected_initial_starting_point = np.array(selected_initial_starting_point)
+                self.position_record.append(selected_initial_starting_point)
                 initial_observation = generate_partial_observation(selected_initial_starting_point, self.main_MAP)
                 return selected_initial_starting_point, initial_observation
             else:
@@ -244,6 +260,7 @@ class ChicagoMultiPolicyMap(Env):
             medium_position_list = np.argwhere( self.sub_MAP[...,1] == select_community)
             selected_medium_position = random.choice(medium_position_list)
             selected_medium_position = np.array(selected_medium_position)
+            self.position_record.append(selected_medium_position)
             medium_observation = generate_partial_observation(selected_medium_position, self.main_MAP)
             return selected_medium_position, medium_observation
 
@@ -257,31 +274,55 @@ class ChicagoMultiPolicyMap(Env):
             if high_positions_list.size > 0:
                 selected_high_position = random.choice(high_positions_list)
                 selected_high_position = np.array(selected_high_position)
+                self.position_record.append(selected_high_position)
                 high_observation = generate_partial_observation(selected_high_position, self.main_MAP)
                 return selected_high_position, high_observation
             else:
                 print("Problem 3.0")
 
-    def step(self, action, factor):
+    def step(self, action, factor=None):
 
-        action_group = action[0:2]
-        x, y, capacity = action[0], action[1], action[2]
+        current_position = self.position_record[-1]
+        converted_action = Action(self.boundary_x, self.boundary_y).local_action_converter(current_position, action) # next position
+
+        action_group = converted_action[0:2]
+        x, y, capacity = converted_action[0], converted_action[1], converted_action[2]
+
         next_observation, next_observation_position = generate_partial_observation(action_group, self.main_MAP)
         observation_position = np.array((50,50))
         VMT_indices = np.argwhere(next_observation_position == -1) # charging demand from vehicle miles traveled, refers to the total number of miles traveled by vehicles in a partial observation map as daily.
+        VMT_indices = VMT_indices[np.linalg.norm(observation_position - VMT_indices, axis=1) < 50]
+        VMT_indices = np.sort(VMT_indices, axis=0)
+        VMT = 0.28 * np.sum([next_observation[x, y] for x, y in VMT_indices])
 
-        Alpha =  # alpha = the ratio of replaced electric resources to alternative sources.
+        PE_indices = np.argwhere(next_observation_position == -8)
+        PE_indices = PE_indices[np.linalg.norm(observation_position - PE_indices, axis=1) < 50]
+        PE_indices = np.sort(PE_indices, axis=0)
+        PE = np.sum([next_observation[x, y] for x, y in PE_indices])
+
+        # alpha = the ratio of replaced electric resources to alternative sources.
+        if PE >= capacity:
+            Alpha = 1
+        else:
+            Alpha = (capacity - PE) / capacity # 0 ~ 1
+
         # Reward function for first policy of environment factor
         if factor == 'environment':
 
-            avm = # average of vegetation in observation map
-            viss = # loss of vegetation cover in selected site after installation EVCSs
+            observation_map_for_avm = generate_partial_observation(action_group, self.sub_MAP)
+            avm_indices = np.argwhere( observation_map_for_avm != 0)
+            avm = np.average([observation_map_for_avm[x, y] for x, y in avm_indices]) # average of vegetation in observation map
+            viss = observation_map_for_avm[50, 50]  # loss of vegetation cover in selected site after installation EVCSs
 
             r_apr = VMT * 1/21.79 * 23.7 - VMT * 1/4.56 * 0.72576
             r_eser = Alpha * VMT * 1/4.56 * 0.72576
             r_TER = r_apr + r_eser # r_TER = total emission reduction, r_apr = Air pollution reduction, r_eser = electricity sources emission reduction by replacing with solar energy
 
-            R_e = r_TER * math.exp(-avm) * math.exp(0.35 - viss) # 0.35 = max vegetation coverage in MAP
+            R_e = r_TER * math.exp(-avm) * math.exp(self.vegetation_percentage_max - viss)
+
+            r = R_e
+
+            info = None
 
         elif factor == 'economic':
 
@@ -295,16 +336,154 @@ class ChicagoMultiPolicyMap(Env):
             P_z = (F_z / VMT) - P_G # input costs per charging demand and electricity profit
             R_ec = 1 / P_z # maximization of the profit of EV charging network investor
 
+            r = R_ec
+
+            info = None
+
         elif factor == 'urbanity':
 
+            main_road_info = np.argwhere(next_observation_position == -2)
+            if len(main_road_info) > 0:
+                r_drn = 1
+            else:
+                r_drn = 0
 
             if Alpha == 1:
                 r_dg = 1
             else:
-                PowerLine_info = np.argwhere()
+                PowerLine_info = np.argwhere(next_observation_position == -4)
+                PowerLine_info = PowerLine_info[np.linalg.norm(observation_position - PowerLine_info, axis=1) < 25]
+
+                if len(PowerLine_info) > 0:
+                    r_dg = 0.5
+                else:
+                    r_dg = 0
+
+            if self.sub_MAP[x,y,1] == 1:
+                r_lu = 1
+            else:
+                r_lu = 0
+
+            if capacity >= (VMT / 4.56):
+                r_sc = 1
+            else:
+                r_sc = 0
+
+
+            R_u = r_drn + r_dg + r_lu + r_sc
+            r = R_u
+
+            info = None
+
+        else:
+            observation_map_for_avm = generate_partial_observation(action_group, self.sub_MAP)
+            avm_indices = np.argwhere(observation_map_for_avm != 0)
+            avm = np.average([observation_map_for_avm[x, y] for x, y in avm_indices])  # average of vegetation in observation map
+            viss = observation_map_for_avm[50, 50]  # loss of vegetation cover in selected site after installation EVCSs
+
+            r_apr = VMT * 1 / 21.79 * 23.7 - VMT * 1 / 4.56 * 0.72576
+            r_eser = Alpha * VMT * 1 / 4.56 * 0.72576
+            r_TER = r_apr + r_eser  # r_TER = total emission reduction, r_apr = Air pollution reduction, r_eser = electricity sources emission reduction by replacing with solar energy
+
+            R_e = r_TER * math.exp(-avm) * math.exp(self.vegetation_percentage_max - viss)
+
+            z = int(capacity / 150, 000)
+            rho = 800
+
+            pc = 20, 600
+
+            F_z = z * rho * pc  # rho = the maintenance and management cost coefficient = $ 800 / charger
+            P_G = (Alpha * 0.00526 + (1 - Alpha) * 0.05) * VMT  # (alternative electricity + general electricity fees) * VMT
+            P_z = (F_z / VMT) - P_G  # input costs per charging demand and electricity profit
+            R_ec = 1 / P_z  # maximization of the profit of EV charging network investor
+
+            main_road_info = np.argwhere(next_observation_position == -2)
+            if len(main_road_info) > 0:
+                r_drn = 1
+            else:
+                r_drn = 0
+
+            if Alpha == 1:
+                r_dg = 1
+            else:
+                PowerLine_info = np.argwhere(next_observation_position == -4)
+                PowerLine_info = PowerLine_info[np.linalg.norm(observation_position - PowerLine_info, axis=1) < 25]
+
+                if len(PowerLine_info) > 0:
+                    r_dg = 0.5
+                else:
+                    r_dg = 0
+
+            if self.sub_MAP[x, y, 1] == 1:
+                r_lu = 1
+            else:
+                r_lu = 0
+
+            if capacity >= (VMT / 4.56):
+                r_sc = 1
+            else:
+                r_sc = 0
 
             R_u = r_drn + r_dg + r_lu + r_sc
 
-        elif factor == 'all':
+            r = R_e + R_ec + R_u
+            info = {"reward_1": R_e, "reward_2": R_ec, "reward_3": R_u, "overall_reward": r}
+            # Update the main and sub MAP environment through learning things.
+            self.sub_MAP[x,y,3] = 0
+            self.main_MAP[x,y,0] = capacity
+            self.main_MAP[x,y,1] = -16
+            self.sub_MAP[x,y,2] = capacity
+            self.capacity_record.append(capacity)
+            merged_ = np.array([self.position_record + self.capacity_record])
+            self.action_record = np.vstack([self.action_record, merged_])
+
+            converted_VMT_indices = current_position + (VMT_indices - observation_position) ## VMT indices in main
+            converted_PE_indices = current_position + (PE_indices - observation_position) ## PE indices in main
+
+            capacity_, capacity__ = capacity, capacity
+            while capacity_ > 0:
+                for a, b in converted_VMT_indices:
+                    capacity_ -= (self.main_MAP[a, b, 0] * 0.28 / 4.56)
+                    self.main_MAP[a, b, 0] *= (1 - 0.28)
+                    if capacity_ <= 0 or converted_VMT_indices[-1] == (a, b):
+                        break
+
+            while capacity__ > 0:
+                for a, b in converted_PE_indices:
+                    capacity__ -= self.main_MAP[a, b, 0]
+                    self.main_MAP[a, b, 0] = 0
+                    self.main_MAP[a, b, 1] = 0
+                    if capacity__ <= 0 or converted_PE_indices[-1] == (a, b):
+                        break
+
+
+        if self.time_step == self.max_steps:
+            done = True
+            r = r
+            terminate = None
+        elif factor is None:
+            done = None
+            r = r
+            self.episode += 1
+            if self.episode == 5000:
+                terminate = True
+            else:
+                terminate = False
+        else:
+            done = False
+            terminate = None
+            r = r
+            self.time_step += 1
+
+        return next_observation, r, done, terminate, info
+
+
+
+
+
+
+
+
+
 
 

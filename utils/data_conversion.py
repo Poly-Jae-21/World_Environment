@@ -76,6 +76,36 @@ class Polygon_to_matrix():
 
         return numpy_array, x_min, x_max, y_min, y_max
 
+    def transform_data_vegetation(self, gdf):
+        # Ensure the land use codes are in the dataframe
+        if 'PERCENT_CA' not in gdf.columns:
+            raise ValueError("The shapefile does not contain a 'PERCENT_CA' column.")
+        try:
+            gdf['PERCENT_CA'] = gdf['PERCENT_CA'].astype(int)
+        except ValueError:
+            raise ValueError("The 'PERCENT_CA' column contains non-numeric values.")
+
+        # Step 2: Define the geometry and transform
+        bounds = gdf.total_bounds  # get bounds of the shapefile
+        resolution = 10  # define your desired resolution
+
+        # Calculate the number of columns and rows for the raster
+        x_min, y_min, x_max, y_max = bounds
+        width = int((x_max - x_min) / resolution)
+        height = int((y_max - y_min) / resolution)
+
+        transform = rasterio.transform.from_origin(west=x_min, north=y_max, xsize=resolution, ysize=resolution)
+
+        # Step 3: Rasterize the geometries with -4 (unique number to sort with other data in main MAP.
+        shapes = ((geom, code) for geom, code in zip(gdf.geometry, gdf['PERCENT_CA']))
+        raster = rasterize(shapes=shapes, out_shape=(height, width), transform=transform, fill=0, dtype='int32')
+
+        # Step 4: Convert the raster to a NumPy array
+        numpy_array = np.array(raster)
+        # numpy_array[numpy_array != 0] = 1
+
+        return numpy_array, x_min, x_max, y_min, y_max
+
     def transform_data_transmission(self, gdf):
 
         # Ensure the land use codes are in the dataframe

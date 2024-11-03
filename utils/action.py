@@ -4,16 +4,34 @@ import torch.distributions as distributions
 
 
 class Action(object):
-    def __init__(self, config, env, actor, critic, observation, state):
-        self.config = config
-        self.env = env
-        self.actor = actor
-        self.critic = critic
-        self.observation = observation
-        self.state = state
+    def __init__(self, boundary_x, boundary_y):
+        self.max_capacity = 30000
+        self.min_capacity = 0
+        self.boundary_x = boundary_x
+        self.boundary_y = boundary_y
+
+    def local_action_converter(self, current_position , next_action):
+        """
+        In the update of local_policy_network, we do not need to record the positions and capacities.
+        Thus, this function just exports converted next action for MAP (Not partial observation) to utilize it on next step as current action.
+        Current action = converted action already for MAP
+        Next action = not-converted action yet for partial observation
+        MAP next action = converted action for MAP from next action
+        """
+
+        MAP_next_action_x = (next_action[0][0] + 1) * 100 / 2 - 50
+        MAP_next_action_y = (next_action[0][1] + 1) * 100 / 2 - 50
+        MAP_next_action = np.array([-MAP_next_action_y, MAP_next_action_x])
+        MAP_next_position = (current_position + MAP_next_action).astype('int32')
+
+        original_next_capacity = (next_action[0][2] + 1) * (self.max_capacity - self.min_capacity) / 2 + self.min_capacity
+
+        MAP_next_action = np.concatenate(MAP_next_position, original_next_capacity) # MAP_next_action -> current_action in next step
+
+        return MAP_next_action
 
     def action_converter(self, action, position_record, action_record):
-        boundary_x, boundary_y = self.env.boundary_x, self.env.boundary_y
+        boundary_x, boundary_y = self.boundary_x, self.boundary_y
         raw_action_x = (action[0][0] + 1) * 100 / 2 - 50
         raw_action_y = (action[0][1] + 1) * 100 / 2 - 50
         raw_action = np.array([-raw_action_y, raw_action_x])
@@ -33,4 +51,5 @@ class Action(object):
         position_record, action_record_ = np.squeeze(np.asarray(position_record)), np.squeeze(np.asarray(action_record_))
 
         return position_record, action_record_
+
 
