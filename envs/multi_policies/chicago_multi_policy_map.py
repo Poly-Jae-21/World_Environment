@@ -1,13 +1,18 @@
-from gym import Env
+import gymnasium as gym
+from gymnasium import Env
 import numpy as np
 from pyogrio import read_dataframe
 from typing_extensions import Optional
 import math
 import gemgis as gg
 import random
+import pygame
+from os import path
 
 from utils.action import Action
 from utils.data_conversion import Polygon_to_matrix, Density
+
+WINDOW_SIZE = [3420, 4207]
 
 def generate_partial_observation(agent_position, MAP):
     p_observation_map = MAP[-50 + agent_position[0]: 50 + agent_position[0], -50 + agent_position[1]: 50 + agent_position[1],0]
@@ -52,11 +57,19 @@ class ChicagoMultiPolicyMap(Env):
         self.main_MAP = None
         self.sub_MAP = None
         self.episode = 0
+        self.initial_position = 0
         self.position_record = []
         self.capacity_record = [0]
+        self.temp_action_record = np.array([[0,0,0]])
         self.action_record = np.array([[0,0,0]])
         self.probability_list = [] ## This is for the starting point distribution probability. It can be updated over episodes after 32 self.episode
         self.max_steps = 100
+
+        # pygame utils
+        self.window = None
+        self.clock = None
+        self.cell_size = 1
+        self.evcs_imgs = None
 
     def Chicago_data(self):
         PtM = Polygon_to_matrix()
@@ -241,6 +254,7 @@ class ChicagoMultiPolicyMap(Env):
         This is to create environment or set up an initial position and initial partial observation
         """
         self.time_step = 0
+        self.initial_position = 0
 
         if self.episode == 0:
             select_community = random.randint(1,77)
@@ -249,7 +263,9 @@ class ChicagoMultiPolicyMap(Env):
             if initial_position_list.size > 0:
                 selected_initial_starting_point = random.choice(initial_position_list)
                 selected_initial_starting_point = np.array(selected_initial_starting_point)
-                self.position_record.append(selected_initial_starting_point)
+                self.initial_position = selected_initial_starting_point
+                self.temp_action_record = np.hstack((self.initial_position, np.array([[0]])))
+
                 initial_observation = generate_partial_observation(selected_initial_starting_point, self.main_MAP)
                 return selected_initial_starting_point, initial_observation
             else:
@@ -260,7 +276,9 @@ class ChicagoMultiPolicyMap(Env):
             medium_position_list = np.argwhere( self.sub_MAP[...,1] == select_community)
             selected_medium_position = random.choice(medium_position_list)
             selected_medium_position = np.array(selected_medium_position)
-            self.position_record.append(selected_medium_position)
+            self.initial_position = selected_medium_position
+            self.temp_action_record = np.hstack((self.initial_position, np.array([[0]])))
+
             medium_observation = generate_partial_observation(selected_medium_position, self.main_MAP)
             return selected_medium_position, medium_observation
 
@@ -274,7 +292,8 @@ class ChicagoMultiPolicyMap(Env):
             if high_positions_list.size > 0:
                 selected_high_position = random.choice(high_positions_list)
                 selected_high_position = np.array(selected_high_position)
-                self.position_record.append(selected_high_position)
+                self.initial_position = selected_high_position
+                self.temp_action_record = np.hstack((self.initial_position, np.array([[0]])))
                 high_observation = generate_partial_observation(selected_high_position, self.main_MAP)
                 return selected_high_position, high_observation
             else:
@@ -282,9 +301,16 @@ class ChicagoMultiPolicyMap(Env):
 
     def step(self, action, factor=None):
 
-        current_position = self.position_record[-1]
-        converted_action = Action(self.boundary_x, self.boundary_y).local_action_converter(current_position, action) # next position
+        if self.time_step == 0:
+            current_position = self.initial_position
+            converted_action = Action(self.boundary_x, self.boundary_y).local_action_converter(current_position, action) # next position
+            self.temp_action_record = np.append(self.temp_action_record, converted_action, axis=0)
+        else:
+            current_position = self.temp_action_record[-1][0:2]
+            converted_action = Action(self.boundary_x, self.boundary_y).local_action_converter(current_position, action)
+            self.temp_action_record = np.append(self.temp_action_record, converted_action, axis=0)
 
+        converted_action = self.temp_action_record[-1]
         action_group = converted_action[0:2]
         x, y, capacity = converted_action[0], converted_action[1], converted_action[2]
 
@@ -428,17 +454,30 @@ class ChicagoMultiPolicyMap(Env):
 
             r = R_e + R_ec + R_u
             info = {"reward_1": R_e, "reward_2": R_ec, "reward_3": R_u, "overall_reward": r}
-            # Update the main and sub MAP environment through learning things.
-            self.sub_MAP[x,y,3] = 0
-            self.main_MAP[x,y,0] = capacity
-            self.main_MAP[x,y,1] = -16
-            self.sub_MAP[x,y,2] = capacity
-            self.capacity_record.append(capacity)
-            merged_ = np.array([self.position_record + self.capacity_record])
-            self.action_record = np.vstack([self.action_record, merged_])
 
-            converted_VMT_indices = current_position + (VMT_indices - observation_position) ## VMT indices in main
-            converted_PE_indices = current_position + (PE_indices - observation_position) ## PE indices in main
+
+        if self.time_step == self.max_steps:
+            done = True
+            r = r
+            terminate = None
+        elif factor is None and self.time_step != self.max_steps:
+            done = False
+            r = r
+            self.time_step += 1
+            terminate = False
+
+        elif factor is None and self.time_step == self.max_steps:
+            done = True
+            r = r
+
+            # Update the main and sub MAP environment through learning things.
+            self.sub_MAP[x, y, 3] = 0
+            self.main_MAP[x, y, 0] = capacity
+            self.main_MAP[x, y, 1] = -16
+            self.sub_MAP[x, y, 2] = capacity
+            self.action_record = np.append(self.action_record, self.temp_action_record[-1], axis=0)
+            converted_VMT_indices = current_position + (VMT_indices - observation_position)  ## VMT indices in main
+            converted_PE_indices = current_position + (PE_indices - observation_position)  ## PE indices in main
 
             capacity_, capacity__ = capacity, capacity
             while capacity_ > 0:
@@ -455,15 +494,6 @@ class ChicagoMultiPolicyMap(Env):
                     self.main_MAP[a, b, 1] = 0
                     if capacity__ <= 0 or converted_PE_indices[-1] == (a, b):
                         break
-
-
-        if self.time_step == self.max_steps:
-            done = True
-            r = r
-            terminate = None
-        elif factor is None:
-            done = None
-            r = r
             self.episode += 1
             if self.episode == 5000:
                 terminate = True
@@ -476,6 +506,45 @@ class ChicagoMultiPolicyMap(Env):
             self.time_step += 1
 
         return next_observation, r, done, terminate, info
+
+    def render(self):
+        if self.render_mode == "human":
+            return self._render_gui()
+
+    def _render_gui(self):
+
+        if self.window is None and self.render_mode == "human":
+            pygame.init()
+            pygame.display.init()
+            self.window = pygame.display.set_mode(WINDOW_SIZE)
+
+        if self.clock is None and self.render_mode == "human":
+            self.clock = pygame.time.Clock()
+
+        if self.evcs_imgs is None:
+            file_name = path.join(path.dirname(__file__), "img/EVCS.png")
+            self.evcs_imgs = pygame.transform.scale(pygame.image.load(file_name), self.cell_size)
+
+        for y in range(self.main_MAP.shape[0]):
+            for x in range(self.main_MAP.shape[1]):
+                cell = (x * self.cell_size, y * self.cell_size)
+                color = (255,255,255)
+                if self.main_MAP[y, x, 1] == -1:
+                    color = (255,0,0) # Red
+                elif self.main_MAP[y, x, 1] == -2:
+                    color = (0,0,255) # Blue
+                elif self.main_MAP[y, x, 1] == - 8:
+                    PE_value = int((self.main_MAP[y, x, 0] / 100) * 255)
+                    color = (PE_value, 0, 0)
+                elif self.main_MAP[y, x, 1] == -16:
+                    self.window.blit(self.evcs_imgs, cell)
+                pygame.draw.rect(self.window, color, pygame.Rect(x * self.cell_size, y * self.cell_size, self.cell_size))
+        pygame.display.flip()
+
+    def close(self):
+        pygame.quit()
+
+
 
 
 
