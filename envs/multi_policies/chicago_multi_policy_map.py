@@ -48,7 +48,7 @@ class ChicagoMultiPolicyMap(Env):
     """
 
     metadata = {
-        "render.modes": ["human", "rgb_array"],
+        "render.modes": ["human"],
         "render_fps": 4,
     }
 
@@ -64,6 +64,8 @@ class ChicagoMultiPolicyMap(Env):
         self.action_record = np.array([[0,0,0]])
         self.probability_list = [] ## This is for the starting point distribution probability. It can be updated over episodes after 32 self.episode
         self.max_steps = 100
+        self.factor = None
+        self.service_radius_list = []
 
         # pygame utils
         self.window = None
@@ -249,7 +251,7 @@ class ChicagoMultiPolicyMap(Env):
         output_action = np.hstack((x_extent, y_extent, capacity))
         return output_action
 
-    def reset(self):
+    def reset(self, info: Optional[list] = None, seed: Optional[int] = None, options: Optional[dict] = None):
         """
         This is to create environment or set up an initial position and initial partial observation
         """
@@ -302,6 +304,7 @@ class ChicagoMultiPolicyMap(Env):
     def step(self, action, factor=None):
 
         if self.time_step == 0:
+            self.factor = factor
             current_position = self.initial_position
             converted_action = Action(self.boundary_x, self.boundary_y).local_action_converter(current_position, action) # next position
             self.temp_action_record = np.append(self.temp_action_record, converted_action, axis=0)
@@ -460,6 +463,8 @@ class ChicagoMultiPolicyMap(Env):
             done = True
             r = r
             terminate = None
+            self.time_step = 0
+
         elif factor is None and self.time_step != self.max_steps:
             done = False
             r = r
@@ -469,6 +474,7 @@ class ChicagoMultiPolicyMap(Env):
         elif factor is None and self.time_step == self.max_steps:
             done = True
             r = r
+            self.time_step = 0
 
             # Update the main and sub MAP environment through learning things.
             self.sub_MAP[x, y, 3] = 0
@@ -485,6 +491,8 @@ class ChicagoMultiPolicyMap(Env):
                     capacity_ -= (self.main_MAP[a, b, 0] * 0.28 / 4.56)
                     self.main_MAP[a, b, 0] *= (1 - 0.28)
                     if capacity_ <= 0 or converted_VMT_indices[-1] == (a, b):
+                        service_radius = np.linalg.norm(action_group -(a,b))
+                        self.service_radius_list.append(service_radius)
                         break
 
             while capacity__ > 0:
@@ -543,6 +551,9 @@ class ChicagoMultiPolicyMap(Env):
 
     def close(self):
         pygame.quit()
+
+    def reward_plot(self):
+
 
 
 
