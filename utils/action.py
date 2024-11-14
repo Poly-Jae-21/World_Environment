@@ -5,8 +5,8 @@ import torch.distributions as distributions
 
 class Action(object):
     def __init__(self, boundary_x, boundary_y):
-        self.max_capacity = 30000
-        self.min_capacity = 0
+        self.max_capacity = 12 ## 12 stalls; 1 stall = 250 kWh = 6 MWh/daily; 12 stalls = 72 MWh/day
+        self.min_capacity = 2 ## 2 stalls; 12 MWh/day
         self.boundary_x = boundary_x
         self.boundary_y = boundary_y
 
@@ -24,7 +24,7 @@ class Action(object):
         MAP_next_action = np.array([-MAP_next_action_y, MAP_next_action_x])
         MAP_next_position = (current_position + MAP_next_action).astype('int32')
 
-        original_next_capacity = (next_action[0][2] + 1) * (self.max_capacity - self.min_capacity) / 2 + self.min_capacity
+        original_next_capacity =6000 * round((next_action[0][2]) * (self.max_capacity - self.min_capacity) + self.min_capacity) ## next_action[0][2] = 0 ~ 1 ex) if 0.1 -> stalls =3
 
         MAP_next_action = np.concatenate(MAP_next_position, original_next_capacity) # MAP_next_action -> current_action in next step
 

@@ -1,9 +1,6 @@
 
-import numpy as np
+import gymnasium as gym
+import envs
+print(dir(gym))
 
-d = []
-s = 3
-ss = 10
-d.append(s)
-d.append(ss)
-print(d, d[-1])
+

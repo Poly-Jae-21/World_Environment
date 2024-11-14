@@ -1,5 +1,5 @@
 import gymnasium as gym
-from gymnasium import Env
+from gymnasium import Env, spaces
 import numpy as np
 from pyogrio import read_dataframe
 from typing_extensions import Optional
@@ -53,6 +53,9 @@ class ChicagoMultiPolicyMap(Env):
     }
 
     def __init__(self, render_mode: Optional[str] = None):
+        self.action_space = spaces.Discrete(3)
+        self.observation_space = spaces.Discrete(10000)
+
         self.time_step = 0
         self.main_MAP = None
         self.sub_MAP = None
@@ -274,32 +277,42 @@ class ChicagoMultiPolicyMap(Env):
                 print("No positions with the value 3 found")
 
         elif 1 <= self.episode <= 31:
-            select_community = random.randint(1,77)
-            medium_position_list = np.argwhere( self.sub_MAP[...,1] == select_community)
-            selected_medium_position = random.choice(medium_position_list)
-            selected_medium_position = np.array(selected_medium_position)
-            self.initial_position = selected_medium_position
-            self.temp_action_record = np.hstack((self.initial_position, np.array([[0]])))
-
-            medium_observation = generate_partial_observation(selected_medium_position, self.main_MAP)
-            return selected_medium_position, medium_observation
+            while True:
+                select_community = random.randint(1,77)
+                medium_position_list = np.argwhere( self.sub_MAP[...,1] == select_community)
+                np.random.shuffle(medium_position_list)
+                for i in range(medium_position_list):
+                    selected_medium_position = np.array(medium_position_list[i])
+                    medium_observation, medium_indices = generate_partial_observation(selected_medium_position, self.main_MAP)
+                    VMT_indices = np.argwhere(medium_observation == -1)
+                    total_VMT = np.sum([medium_observation[x, y] for x, y in VMT_indices]) / 4.56
+                    if total_VMT < 12000 or i < len(medium_position_list) - 1:
+                        continue
+                    elif total_VMT >= 12000 and i <= len(medium_position_list) - 1:
+                        self.initial_position = selected_medium_position
+                        self.temp_action_record = np.hstack((self.initial_position, np.array([[0]])))
+                        return selected_medium_position, medium_observation
 
         else:
             Density_weight = self.Den.KernelDensity(self.radius, self.sub_MAP)
             updated_weight_list = 1 / (np.exp(Density_weight) + 77) ## 77 = The number of community areas in Chicago
             self.probability_list = updated_weight_list / np.sum(updated_weight_list)
 
-            selected_community = random.choices(population=[i+1 for i in range(77)], weights=self.probability_list, k=1)
-            high_positions_list = np.argwhere(self.sub_MAP[...,1] == selected_community)
-            if high_positions_list.size > 0:
-                selected_high_position = random.choice(high_positions_list)
-                selected_high_position = np.array(selected_high_position)
-                self.initial_position = selected_high_position
-                self.temp_action_record = np.hstack((self.initial_position, np.array([[0]])))
-                high_observation = generate_partial_observation(selected_high_position, self.main_MAP)
-                return selected_high_position, high_observation
-            else:
-                print("Problem 3.0")
+            while True:
+                selected_community = random.choices(population=[i+1 for i in range(77)], weights=self.probability_list, k=1)
+                high_positions_list = np.argwhere(self.sub_MAP[...,1] == selected_community)
+                np.random.shuffle(high_positions_list)
+                for i in range(high_positions_list):
+                    selected_high_position = np.array(high_positions_list[i])
+                    high_observation, high_indices = generate_partial_observation(selected_high_position, self.main_MAP)
+                    VMT_indices = np.argwhere(high_observation == -1)
+                    total_VMT = np.sum([high_observation[x, y] for x, y in VMT_indices]) / 4.56
+                    if total_VMT < 12000 or i < len(high_positions_list) - 1:
+                        continue
+                    elif total_VMT >= 12000 and i <= len(high_positions_list) - 1:
+                        self.initial_position = selected_high_position
+                        self.temp_action_record = np.hstack((self.initial_position, np.array([[0]])))
+                        return selected_high_position, high_observation
 
     def step(self, action, factor=None):
 
@@ -552,7 +565,6 @@ class ChicagoMultiPolicyMap(Env):
     def close(self):
         pygame.quit()
 
-    def reward_plot(self):
 
 
 
