@@ -11,14 +11,3 @@ packages = ["envs"]
 [projct]
 name = "gymnasium_env_jae"
 version = "0.0.1"
-dependencies = [
-    "copier",
-    "pyyaml",
-    "gymnasium",
-    "pytest",
-    "toml",
-    "mypy",
-]
-
-[tool.ruff.pydocstyle]
-convention = "numpy"
