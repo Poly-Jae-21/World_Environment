@@ -1,4 +1,3 @@
-import gymnasium as gym
 from gymnasium import Env, spaces
 import numpy as np
 from pyogrio import read_dataframe
@@ -9,8 +8,8 @@ import random
 import pygame
 from os import path
 
-from utils.action import Action
-from utils.data_conversion import Polygon_to_matrix, Density
+from template.env_name.envs.utils.action import Action
+from template.env_name.envs.utils.data_conversion import Polygon_to_matrix, Density
 
 WINDOW_SIZE = [3420, 4207]
 
