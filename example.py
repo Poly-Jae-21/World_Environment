@@ -1,3 +1,3 @@
-import gymnasium
-import gymjaechicago
+import sys
+print(sys.path)
 
