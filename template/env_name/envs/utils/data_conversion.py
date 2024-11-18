@@ -93,7 +93,7 @@ class Polygon_to_matrix():
         x_min, y_min, x_max, y_max = bounds
         width = int((x_max - x_min) / resolution)
         height = int((y_max - y_min) / resolution)
-
+        x_min, y_min, x_max, y_max = x_min / resolution, y_min / resolution, x_max / resolution, y_max / resolution
         transform = rasterio.transform.from_origin(west=x_min, north=y_max, xsize=resolution, ysize=resolution)
 
         # Step 3: Rasterize the geometries with -4 (unique number to sort with other data in main MAP.
@@ -124,7 +124,7 @@ class Polygon_to_matrix():
         x_min, y_min, x_max, y_max = bounds
         width = int((x_max - x_min) / resolution)
         height = int((y_max - y_min) / resolution)
-
+        x_min, y_min, x_max, y_max = x_min / resolution, y_min / resolution, x_max / resolution, y_max / resolution
         transform = rasterio.transform.from_origin(west=x_min, north=y_max, xsize=resolution, ysize=resolution)
 
         # Step 3: Rasterize the geometries with -4 (unique number to sort with other data in main MAP.
@@ -139,13 +139,13 @@ class Polygon_to_matrix():
 
     def transform_data_mainroad(self, gdf):
         # Ensure the land use codes are in the dataframe
-        if 'class' not in gdf.columns:
-            raise ValueError("The shapefile does not contain a 'class' column.")
+        if 'objectid' not in gdf.columns:
+            raise ValueError("The shapefile does not contain a 'objectid' column.")
         try:
-            gdf['class'] = gdf['class'].astype(int)
+            gdf['objectid'] = gdf['objectid'].astype(int)
         except ValueError:
-            raise ValueError("The 'class' column contains non-numeric values.")
-        gdf['class'] = -2
+            raise ValueError("The 'objectid' column contains non-numeric values.")
+        gdf['objectid'] = -2
         # Step 2: Define the geometry and transform
         bounds = gdf.total_bounds  # get bounds of the shapefile
         resolution = 10  # define your desired resolution
@@ -154,11 +154,11 @@ class Polygon_to_matrix():
         x_min, y_min, x_max, y_max = bounds
         width = int((x_max - x_min) / resolution)
         height = int((y_max - y_min) / resolution)
-
+        x_min, y_min, x_max, y_max = x_min / resolution, y_min / resolution, x_max / resolution, y_max / resolution
         transform = rasterio.transform.from_origin(west=x_min, north=y_max, xsize=resolution, ysize=resolution)
 
         # Step 3: Rasterize the geometries with -4 (unique number to sort with other data in main MAP.
-        shapes = ((geom, code) for geom, code in zip(gdf.geometry, gdf['class']))
+        shapes = ((geom, code) for geom, code in zip(gdf.geometry, gdf['objectid']))
         raster = rasterize(shapes=shapes, out_shape=(height, width), transform=transform, fill=0, dtype='int32')
 
         # Step 4: Convert the raster to a NumPy array
