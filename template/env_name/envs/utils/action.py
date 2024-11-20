@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import torch.distributions as distributions
-
+import math
 
 class Action(object):
     def __init__(self, boundary_x, boundary_y):
@@ -19,14 +19,13 @@ class Action(object):
         MAP next action = converted action for MAP from next action
         """
 
-        MAP_next_action_x = (next_action[0][0] + 1) * 100 / 2 - 50
-        MAP_next_action_y = (next_action[0][1] + 1) * 100 / 2 - 50
+        MAP_next_action_x = round(np.tanh(next_action[0])*50)
+        MAP_next_action_y = round(np.tanh(next_action[1])*50)
         MAP_next_action = np.array([-MAP_next_action_y, MAP_next_action_x])
         MAP_next_position = (current_position + MAP_next_action).astype('int32')
 
-        original_next_capacity =6000 * round((next_action[0][2]) * (self.max_capacity - self.min_capacity) + self.min_capacity) ## next_action[0][2] = 0 ~ 1 ex) if 0.1 -> stalls =3
-
-        MAP_next_action = np.concatenate(MAP_next_position, original_next_capacity) # MAP_next_action -> current_action in next step
+        original_next_capacity = 6000 * (np.tanh(next_action[2]) * (self.max_capacity-self.min_capacity)/2 + (self.max_capacity+self.min_capacity)/2) ## next_action[0][2] = 0 ~ 1 ex) if 0.1 -> stalls =3
+        MAP_next_action = np.concatenate((MAP_next_position, np.array([original_next_capacity]))) # MAP_next_action -> current_action in next step
 
         return MAP_next_action
 

@@ -15,9 +15,13 @@ from template.env_name.envs.utils.data_conversion import Polygon_to_matrix, Dens
 WINDOW_SIZE = [3420, 4207]
 
 def generate_partial_observation(agent_position, MAP):
-    p_observation_map = MAP[-50 + agent_position[0]: 50 + agent_position[0], -50 + agent_position[1]: 50 + agent_position[1],0]
-    information_position_map = MAP[-50 + agent_position[0]: 50 + agent_position[0], -50 + agent_position[1]: 50 + agent_position[1],1]
+    p_observation_map = MAP[0, -50 + agent_position[0]: 50 + agent_position[0], -50 + agent_position[1]: 50 + agent_position[1]]
+    information_position_map = MAP[1, -50 + agent_position[0]: 50 + agent_position[0], -50 + agent_position[1]: 50 + agent_position[1]]
     return p_observation_map, information_position_map
+
+def generate_partial_observation_sub(agent_position, sub_MAP):
+    p_observation_map = sub_MAP[:,-50 + agent_position[0]: 50 + agent_position[0], -50 + agent_position[1]: 50 + agent_position[1]]
+    return p_observation_map
 
 class ChicagoMultiPolicyMap(Env):
     """
@@ -48,7 +52,7 @@ class ChicagoMultiPolicyMap(Env):
     """
 
     metadata = {
-        "render.modes": ["human"],
+        "render_modes": ["human"],
         "render_fps": 4,
     }
 
@@ -78,6 +82,8 @@ class ChicagoMultiPolicyMap(Env):
         self.clock = None
         self.cell_size = 1
         self.evcs_imgs = None
+
+        self.render_mode = render_mode
 
     def Chicago_data(self):
         PtM = Polygon_to_matrix()
@@ -201,25 +207,25 @@ class ChicagoMultiPolicyMap(Env):
 
         for ii in range(len(obj5)):
             x_val, y_val = int(obj5.iloc[ii, -2]), int(obj5.iloc[ii, -1])
-            VMT = obj5.iloc[ii, -3]
+            VMT = obj5.iloc[ii, -4]
             info = -1
-            if x_val > self.max_x or x_val < self.min_x or y_val > self.max_y or y_val < self.min_y:
+            if x_val > self.boundary_x or x_val < 0 or y_val > self.boundary_y or y_val < 0:
                 continue
             else:
-                MAP[0, self.boundary_y - y_val, x_val - self.min_x] = VMT
-                MAP[1, self.boundary_y - y_val, x_val - self.min_x] = info
+                MAP[0, self.boundary_y - y_val, x_val] = VMT
+                MAP[1, self.boundary_y - y_val, x_val] = info
 
         for ii in range(len(obj6)):
             x_val, y_val = int(obj6.iloc[ii, -2]), int(obj6.iloc[ii, -1])
             PE = obj6.iloc[ii, -4]
             info = -8
-            if x_val > self.max_x or x_val < self.min_x or y_val > self.max_y or y_val < self.min_y:
+            if x_val > self.max_x or x_val < 0 or y_val > self.max_y or y_val < 0:
                 continue
             else:
-                MAP[0, self.boundary_y - y_val, x_val - self.min_x] = PE
-                MAP[1, self.boundary_y - y_val, x_val - self.min_x] = info
+                MAP[0, self.boundary_y - y_val, x_val] = PE
+                MAP[1, self.boundary_y - y_val, x_val] = info
 
-        MAP[0, :obj7.shape[0], MAP.shape[2] - obj7.shape[1]:] = obj7 + MAP[0, :obj7.shape[0],MAP.shape[2]-obj7.shape[1]:]
+        MAP[0, :obj7.shape[0], MAP.shape[2] - obj7.shape[1]:] = obj7 + MAP[0, :obj7.shape[0], MAP.shape[2]-obj7.shape[1]:]
         MAP[1, :obj7.shape[0], MAP.shape[2] - obj7.shape[1]:] = obj7 + MAP[1, :obj7.shape[0], MAP.shape[2] - obj7.shape[1]:]
 
         MAP[0, :obj4.shape[0], MAP.shape[2] - obj4.shape[1]:] = obj4 + MAP[0, :obj4.shape[0], MAP.shape[2] - obj4.shape[1]:]
@@ -233,10 +239,10 @@ class ChicagoMultiPolicyMap(Env):
 
         for ii in range(len(obj3)):
             x_val, y_val = int(obj3.iloc[ii, -2]), int(obj3.iloc[ii, -1])
-            if x_val > self.max_x or x_val < self.min_x or y_val > self.max_y or y_val < self.min_y:
+            if x_val > self.max_x or x_val < 0 or y_val > self.max_y or y_val < 0:
                 continue
             else:
-                sub_MAP[3, self.boundary_y - y_val, x_val - self.min_x] = -1
+                sub_MAP[3, self.boundary_y - y_val, x_val] = -1
         return MAP, sub_MAP
 
     def conversion_into_extent(self, action_record):
@@ -255,44 +261,47 @@ class ChicagoMultiPolicyMap(Env):
         output_action = np.hstack((x_extent, y_extent, capacity))
         return output_action
 
-    def reset(self, info: Optional[list] = None, seed: Optional[int] = None, options: Optional[dict] = None):
+    def reset(self):
         """
         This is to create environment or set up an initial position and initial partial observation
         """
         self.time_step = 0
-        self.initial_position = 0
+        self.initial_position = np.array([0, 0])
 
         if self.episode == 0:
             select_community = random.randint(1,77)
             self.main_MAP, self.sub_MAP = self.Mapping()
-            initial_position_list = np.argwhere(self.sub_MAP[...,1] == select_community)
+            initial_position_list = np.argwhere(self.sub_MAP[0,...] == select_community)
             if initial_position_list.size > 0:
                 selected_initial_starting_point = random.choice(initial_position_list)
                 selected_initial_starting_point = np.array(selected_initial_starting_point)
                 self.initial_position = selected_initial_starting_point
-                self.temp_action_record = np.hstack((self.initial_position, np.array([[0]])))
+                self.temp_action_record = np.hstack((self.initial_position, np.array([0])))
 
-                initial_observation = generate_partial_observation(selected_initial_starting_point, self.main_MAP)
-                return selected_initial_starting_point, initial_observation
+                initial_observation, _ = generate_partial_observation(selected_initial_starting_point, self.main_MAP)
+                info = {"community": select_community, "initial_position": self.initial_position.tolist()}
+                return initial_observation, info
             else:
                 print("No positions with the value 3 found")
+                info = {"error": f"No valid positions in community {select_community}"}
+                return None, info
 
         elif 1 <= self.episode <= 31:
             while True:
                 select_community = random.randint(1,77)
-                medium_position_list = np.argwhere( self.sub_MAP[...,1] == select_community)
+                medium_position_list = np.argwhere( self.sub_MAP[0,...] == select_community)
                 np.random.shuffle(medium_position_list)
-                for i in range(medium_position_list):
-                    selected_medium_position = np.array(medium_position_list[i])
+                for i in medium_position_list:
+                    selected_medium_position = np.array(i)
                     medium_observation, medium_indices = generate_partial_observation(selected_medium_position, self.main_MAP)
                     VMT_indices = np.argwhere(medium_observation == -1)
                     total_VMT = np.sum([medium_observation[x, y] for x, y in VMT_indices]) / 4.56
-                    if total_VMT < 12000 or i < len(medium_position_list) - 1:
-                        continue
-                    elif total_VMT >= 12000 and i <= len(medium_position_list) - 1:
+
+                    if total_VMT >= 12000:
                         self.initial_position = selected_medium_position
-                        self.temp_action_record = np.hstack((self.initial_position, np.array([[0]])))
-                        return selected_medium_position, medium_observation
+                        self.temp_action_record = np.hstack((self.initial_position, np.array([0])))
+                        info = {"community": select_community, "initial_position": self.initial_position.tolist()}
+                        return medium_observation, info
 
         else:
             Density_weight = self.Den.KernelDensity(self.radius, self.sub_MAP)
@@ -300,38 +309,38 @@ class ChicagoMultiPolicyMap(Env):
             self.probability_list = updated_weight_list / np.sum(updated_weight_list)
 
             while True:
-                selected_community = random.choices(population=[i+1 for i in range(77)], weights=self.probability_list, k=1)
-                high_positions_list = np.argwhere(self.sub_MAP[...,1] == selected_community)
+                selected_community = random.choices(population=[i+1 for i in range(77)], weights=self.probability_list, k=1)[0]
+                high_positions_list = np.argwhere(self.sub_MAP[0,...] == selected_community)
                 np.random.shuffle(high_positions_list)
-                for i in range(high_positions_list):
-                    selected_high_position = np.array(high_positions_list[i])
+                for i in high_positions_list:
+                    selected_high_position = np.array(i)
                     high_observation, high_indices = generate_partial_observation(selected_high_position, self.main_MAP)
                     VMT_indices = np.argwhere(high_observation == -1)
                     total_VMT = np.sum([high_observation[x, y] for x, y in VMT_indices]) / 4.56
-                    if total_VMT < 12000 or i < len(high_positions_list) - 1:
-                        continue
-                    elif total_VMT >= 12000 and i <= len(high_positions_list) - 1:
+                    if total_VMT >= 12000 and i <= len(high_positions_list) - 1:
                         self.initial_position = selected_high_position
-                        self.temp_action_record = np.hstack((self.initial_position, np.array([[0]])))
-                        return selected_high_position, high_observation
+                        self.temp_action_record = np.hstack((self.initial_position, np.array([0])))
+                        info = {"community": selected_community, "initial_position": self.initial_position.tolist()}
+                        return high_observation, info
 
-    def step(self, action, factor=None):
-
+    def step(self, action_with_factor):
+        action, factor = action_with_factor
         if self.time_step == 0:
             self.factor = factor
             current_position = self.initial_position
             converted_action = Action(self.boundary_x, self.boundary_y).local_action_converter(current_position, action) # next position
-            self.temp_action_record = np.append(self.temp_action_record, converted_action, axis=0)
+            self.temp_action_record = np.vstack((self.temp_action_record, converted_action))
         else:
             current_position = self.temp_action_record[-1][0:2]
             converted_action = Action(self.boundary_x, self.boundary_y).local_action_converter(current_position, action)
-            self.temp_action_record = np.append(self.temp_action_record, converted_action, axis=0)
+            self.temp_action_record = np.vstack((self.temp_action_record, converted_action))
 
         converted_action = self.temp_action_record[-1]
-        action_group = converted_action[0:2]
+        action_group = converted_action[0:2].astype(int)
         x, y, capacity = converted_action[0], converted_action[1], converted_action[2]
 
         next_observation, next_observation_position = generate_partial_observation(action_group, self.main_MAP)
+        observation_for_subMap = generate_partial_observation_sub(action_group, self.sub_MAP)
         observation_position = np.array((50,50))
         VMT_indices = np.argwhere(next_observation_position == -1) # charging demand from vehicle miles traveled, refers to the total number of miles traveled by vehicles in a partial observation map as daily.
         VMT_indices = VMT_indices[np.linalg.norm(observation_position - VMT_indices, axis=1) < 50]
@@ -352,7 +361,7 @@ class ChicagoMultiPolicyMap(Env):
         # Reward function for first policy of environment factor
         if factor == 'environment':
 
-            observation_map_for_avm = generate_partial_observation(action_group, self.sub_MAP)
+            observation_map_for_avm = observation_for_subMap[2,...]
             avm_indices = np.argwhere( observation_map_for_avm != 0)
             avm = np.average([observation_map_for_avm[x, y] for x, y in avm_indices]) # average of vegetation in observation map
             viss = observation_map_for_avm[50, 50]  # loss of vegetation cover in selected site after installation EVCSs
@@ -365,7 +374,7 @@ class ChicagoMultiPolicyMap(Env):
 
             r = R_e
 
-            info = None
+            info = {}
 
         elif factor == 'economic':
 
@@ -381,7 +390,7 @@ class ChicagoMultiPolicyMap(Env):
 
             r = R_ec
 
-            info = None
+            info = {}
 
         elif factor == 'urbanity':
 
@@ -402,7 +411,7 @@ class ChicagoMultiPolicyMap(Env):
                 else:
                     r_dg = 0
 
-            if self.sub_MAP[x,y,1] == 1:
+            if self.sub_MAP[1, x,y] == 1:
                 r_lu = 1
             else:
                 r_lu = 0
@@ -416,10 +425,10 @@ class ChicagoMultiPolicyMap(Env):
             R_u = r_drn + r_dg + r_lu + r_sc
             r = R_u
 
-            info = None
+            info = {}
 
         else:
-            observation_map_for_avm = generate_partial_observation(action_group, self.sub_MAP)
+            observation_map_for_avm = observation_for_subMap[2,...]
             avm_indices = np.argwhere(observation_map_for_avm != 0)
             avm = np.average([observation_map_for_avm[x, y] for x, y in avm_indices])  # average of vegetation in observation map
             viss = observation_map_for_avm[50, 50]  # loss of vegetation cover in selected site after installation EVCSs
@@ -457,7 +466,7 @@ class ChicagoMultiPolicyMap(Env):
                 else:
                     r_dg = 0
 
-            if self.sub_MAP[x, y, 1] == 1:
+            if self.sub_MAP[1, x, y] == 1:
                 r_lu = 1
             else:
                 r_lu = 0
@@ -476,7 +485,7 @@ class ChicagoMultiPolicyMap(Env):
         if self.time_step == self.max_steps:
             done = True
             r = r
-            terminate = None
+            terminate = False
             self.time_step = 0
 
         elif factor is None and self.time_step != self.max_steps:
@@ -491,10 +500,10 @@ class ChicagoMultiPolicyMap(Env):
             self.time_step = 0
 
             # Update the main and sub MAP environment through learning things.
-            self.sub_MAP[x, y, 3] = 0
-            self.main_MAP[x, y, 0] = capacity
-            self.main_MAP[x, y, 1] = -16
-            self.sub_MAP[x, y, 2] = capacity
+            self.sub_MAP[2, x, y] = 0
+            self.main_MAP[0, x, y] = capacity
+            self.main_MAP[1, x, y] = -16
+            self.sub_MAP[3, x, y] = capacity
             self.action_record = np.append(self.action_record, self.temp_action_record[-1], axis=0)
             converted_VMT_indices = current_position + (VMT_indices - observation_position)  ## VMT indices in main
             converted_PE_indices = current_position + (PE_indices - observation_position)  ## PE indices in main
@@ -502,8 +511,8 @@ class ChicagoMultiPolicyMap(Env):
             capacity_, capacity__ = capacity, capacity
             while capacity_ > 0:
                 for a, b in converted_VMT_indices:
-                    capacity_ -= (self.main_MAP[a, b, 0] * 0.28 / 4.56)
-                    self.main_MAP[a, b, 0] *= (1 - 0.28)
+                    capacity_ -= (self.main_MAP[0, a, b] * 0.28 / 4.56)
+                    self.main_MAP[0, a, b] *= (1 - 0.28)
                     if capacity_ <= 0 or converted_VMT_indices[-1] == (a, b):
                         service_radius = np.linalg.norm(action_group -(a,b))
                         self.service_radius_list.append(service_radius)
@@ -511,9 +520,9 @@ class ChicagoMultiPolicyMap(Env):
 
             while capacity__ > 0:
                 for a, b in converted_PE_indices:
-                    capacity__ -= self.main_MAP[a, b, 0]
-                    self.main_MAP[a, b, 0] = 0
-                    self.main_MAP[a, b, 1] = 0
+                    capacity__ -= self.main_MAP[0, a, b]
+                    self.main_MAP[0, a, b] = 0
+                    self.main_MAP[1, a, b] = 0
                     if capacity__ <= 0 or converted_PE_indices[-1] == (a, b):
                         break
             self.episode += 1
@@ -523,7 +532,7 @@ class ChicagoMultiPolicyMap(Env):
                 terminate = False
         else:
             done = False
-            terminate = None
+            terminate = False
             r = r
             self.time_step += 1
 
@@ -547,18 +556,18 @@ class ChicagoMultiPolicyMap(Env):
             file_name = path.join(path.dirname(__file__), "img/EVCS.png")
             self.evcs_imgs = pygame.transform.scale(pygame.image.load(file_name), self.cell_size)
 
-        for y in range(self.main_MAP.shape[0]):
-            for x in range(self.main_MAP.shape[1]):
+        for y in range(self.main_MAP.shape[1]):
+            for x in range(self.main_MAP.shape[2]):
                 cell = (x * self.cell_size, y * self.cell_size)
                 color = (255,255,255)
-                if self.main_MAP[y, x, 1] == -1:
+                if self.main_MAP[1, y, x] == -1:
                     color = (255,0,0) # Red
-                elif self.main_MAP[y, x, 1] == -2:
+                elif self.main_MAP[1, y, x] == -2:
                     color = (0,0,255) # Blue
-                elif self.main_MAP[y, x, 1] == - 8:
-                    PE_value = int((self.main_MAP[y, x, 0] / 100) * 255)
+                elif self.main_MAP[1, y, x] == - 8:
+                    PE_value = int((self.main_MAP[0, y, x] / 100) * 255)
                     color = (PE_value, 0, 0)
-                elif self.main_MAP[y, x, 1] == -16:
+                elif self.main_MAP[1, y, x] == -16:
                     self.window.blit(self.evcs_imgs, cell)
                 pygame.draw.rect(self.window, color, pygame.Rect(x * self.cell_size, y * self.cell_size, self.cell_size))
         pygame.display.flip()

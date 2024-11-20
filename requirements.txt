@@ -1,0 +1,13 @@
+setuptools~=72.1.0
+numpy~=1.26.4
+gym~=0.26.2
+geopandas~=0.14.2
+rasterio~=1.3.9
+gemgis~=1.1.8
+pyogrio~=0.7.2
+pandas~=2.2.2
+gymnasium~=0.28.1
+scikit-learn~=1.5.1
+pyvista~=0.44.1
+pygame~=2.1.3
+typing_extensions~=4.11.0

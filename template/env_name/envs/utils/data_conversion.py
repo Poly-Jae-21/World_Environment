@@ -39,16 +39,17 @@ class Polygon_to_matrix():
 
         width = int((x_max - x_min) / resolution)
         height = int((y_max - y_min) / resolution)
-        x_min, y_min, x_max, y_max = x_min / resolution, y_min / resolution, x_max / resolution, y_max / resolution
 
         transform = rasterio.transform.from_origin(west=x_min, north=y_max, xsize=resolution, ysize=resolution)
 
         # Step 3: Rasterize the geometries with land use codes
-        shapes = ((geom, code) for geom, code in zip(gdf.geometry, gdf['LANDUSE']))
+        shapes = list((geom, code) for geom, code in zip(gdf.geometry, gdf['LANDUSE']))
         raster = rasterize(shapes=shapes, out_shape=(height, width), transform=transform, fill=0, dtype='int32')
 
         # Step 4: Convert the raster to a NumPy array
         numpy_array = np.array(raster)
+
+        x_min, y_min, x_max, y_max = x_min / resolution, y_min / resolution, x_max / resolution, y_max / resolution
 
         return numpy_array, x_min, x_max, y_min, y_max
 
@@ -65,7 +66,6 @@ class Polygon_to_matrix():
         x_min, y_min, x_max, y_max = bounds
         width = int((x_max - x_min) / resolution)
         height = int((y_max - y_min) / resolution)
-        x_min, y_min, x_max, y_max = x_min / resolution, y_min / resolution, x_max / resolution, y_max / resolution
 
         transform = rasterio.transform.from_origin(west=x_min, north=y_max, xsize=resolution, ysize=resolution)
 
@@ -73,6 +73,8 @@ class Polygon_to_matrix():
         raster = rasterize(shapes=shapes, out_shape=(height, width), transform=transform, fill=0, dtype='int32')
 
         numpy_array = np.array(raster)
+
+        x_min, y_min, x_max, y_max = x_min / resolution, y_min / resolution, x_max / resolution, y_max / resolution
 
         return numpy_array, x_min, x_max, y_min, y_max
 
@@ -93,7 +95,7 @@ class Polygon_to_matrix():
         x_min, y_min, x_max, y_max = bounds
         width = int((x_max - x_min) / resolution)
         height = int((y_max - y_min) / resolution)
-        x_min, y_min, x_max, y_max = x_min / resolution, y_min / resolution, x_max / resolution, y_max / resolution
+
         transform = rasterio.transform.from_origin(west=x_min, north=y_max, xsize=resolution, ysize=resolution)
 
         # Step 3: Rasterize the geometries with -4 (unique number to sort with other data in main MAP.
@@ -103,6 +105,8 @@ class Polygon_to_matrix():
         # Step 4: Convert the raster to a NumPy array
         numpy_array = np.array(raster)
         # numpy_array[numpy_array != 0] = 1
+
+        x_min, y_min, x_max, y_max = x_min / resolution, y_min / resolution, x_max / resolution, y_max / resolution
 
         return numpy_array, x_min, x_max, y_min, y_max
 
@@ -124,7 +128,7 @@ class Polygon_to_matrix():
         x_min, y_min, x_max, y_max = bounds
         width = int((x_max - x_min) / resolution)
         height = int((y_max - y_min) / resolution)
-        x_min, y_min, x_max, y_max = x_min / resolution, y_min / resolution, x_max / resolution, y_max / resolution
+
         transform = rasterio.transform.from_origin(west=x_min, north=y_max, xsize=resolution, ysize=resolution)
 
         # Step 3: Rasterize the geometries with -4 (unique number to sort with other data in main MAP.
@@ -134,6 +138,8 @@ class Polygon_to_matrix():
         # Step 4: Convert the raster to a NumPy array
         numpy_array = np.array(raster)
         #numpy_array[numpy_array != 0] = 1
+
+        x_min, y_min, x_max, y_max = x_min / resolution, y_min / resolution, x_max / resolution, y_max / resolution
 
         return numpy_array, x_min, x_max, y_min, y_max
 
@@ -154,7 +160,7 @@ class Polygon_to_matrix():
         x_min, y_min, x_max, y_max = bounds
         width = int((x_max - x_min) / resolution)
         height = int((y_max - y_min) / resolution)
-        x_min, y_min, x_max, y_max = x_min / resolution, y_min / resolution, x_max / resolution, y_max / resolution
+
         transform = rasterio.transform.from_origin(west=x_min, north=y_max, xsize=resolution, ysize=resolution)
 
         # Step 3: Rasterize the geometries with -4 (unique number to sort with other data in main MAP.
@@ -163,6 +169,8 @@ class Polygon_to_matrix():
 
         # Step 4: Convert the raster to a NumPy array
         numpy_array = np.array(raster)
+
+        x_min, y_min, x_max, y_max = x_min / resolution, y_min / resolution, x_max / resolution, y_max / resolution
 
         return numpy_array, x_min, x_max, y_min, y_max
 
