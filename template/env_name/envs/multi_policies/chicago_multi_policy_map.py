@@ -337,7 +337,7 @@ class ChicagoMultiPolicyMap(Env):
 
         converted_action = self.temp_action_record[-1]
         action_group = converted_action[0:2].astype(int)
-        x, y, capacity = converted_action[0], converted_action[1], converted_action[2]
+        x, y, capacity = converted_action[0].astype(int), converted_action[1].astype(int), converted_action[2].astype(int)
 
         next_observation, next_observation_position = generate_partial_observation(action_group, self.main_MAP)
         observation_for_subMap = generate_partial_observation_sub(action_group, self.sub_MAP)
@@ -345,12 +345,12 @@ class ChicagoMultiPolicyMap(Env):
         VMT_indices = np.argwhere(next_observation_position == -1) # charging demand from vehicle miles traveled, refers to the total number of miles traveled by vehicles in a partial observation map as daily.
         VMT_indices = VMT_indices[np.linalg.norm(observation_position - VMT_indices, axis=1) < 50]
         VMT_indices = np.sort(VMT_indices, axis=0)
-        VMT = 0.28 * np.sum([next_observation[x, y] for x, y in VMT_indices])
+        VMT = 0.28 * np.sum([next_observation[y, x] for x, y in VMT_indices])
 
         PE_indices = np.argwhere(next_observation_position == -8)
         PE_indices = PE_indices[np.linalg.norm(observation_position - PE_indices, axis=1) < 50]
         PE_indices = np.sort(PE_indices, axis=0)
-        PE = np.sum([next_observation[x, y] for x, y in PE_indices])
+        PE = np.sum([next_observation[y, x] for x, y in PE_indices])
 
         # alpha = the ratio of replaced electric resources to alternative sources.
         if PE >= capacity:
@@ -363,7 +363,7 @@ class ChicagoMultiPolicyMap(Env):
 
             observation_map_for_avm = observation_for_subMap[2,...]
             avm_indices = np.argwhere( observation_map_for_avm != 0)
-            avm = np.average([observation_map_for_avm[x, y] for x, y in avm_indices]) # average of vegetation in observation map
+            avm = np.average([observation_map_for_avm[y,x] for x, y in avm_indices]) # average of vegetation in observation map
             viss = observation_map_for_avm[50, 50]  # loss of vegetation cover in selected site after installation EVCSs
 
             r_apr = VMT * 1/21.79 * 23.7 - VMT * 1/4.56 * 0.72576
@@ -378,10 +378,13 @@ class ChicagoMultiPolicyMap(Env):
 
         elif factor == 'economic':
 
-            z = int(capacity / 150,000)
+            if capacity <= 0:
+                z = 0
+            else:
+                z = round(capacity / 6000)
             rho = 800
 
-            pc = 20,600
+            pc = 20600
 
             F_z = z * rho * pc # rho = the maintenance and management cost coefficient = $ 800 / charger
             P_G = (Alpha * 0.00526 + (1 - Alpha) * 0.05) * VMT    # (alternative electricity + general electricity fees) * VMT
@@ -411,7 +414,7 @@ class ChicagoMultiPolicyMap(Env):
                 else:
                     r_dg = 0
 
-            if self.sub_MAP[1, x,y] == 1:
+            if self.sub_MAP[1, y,x] == 1:
                 r_lu = 1
             else:
                 r_lu = 0
@@ -430,7 +433,7 @@ class ChicagoMultiPolicyMap(Env):
         else:
             observation_map_for_avm = observation_for_subMap[2,...]
             avm_indices = np.argwhere(observation_map_for_avm != 0)
-            avm = np.average([observation_map_for_avm[x, y] for x, y in avm_indices])  # average of vegetation in observation map
+            avm = np.average([observation_map_for_avm[y, x] for x, y in avm_indices])  # average of vegetation in observation map
             viss = observation_map_for_avm[50, 50]  # loss of vegetation cover in selected site after installation EVCSs
 
             r_apr = VMT * 1 / 21.79 * 23.7 - VMT * 1 / 4.56 * 0.72576
@@ -439,10 +442,13 @@ class ChicagoMultiPolicyMap(Env):
 
             R_e = r_TER * math.exp(-avm) * math.exp(self.vegetation_percentage_max - viss)
 
-            z = int(capacity / 150, 000)
+            if capacity <= 0:
+                z = 0
+            else:
+                z = round(capacity / 3000)
             rho = 800
 
-            pc = 20, 600
+            pc = 20600
 
             F_z = z * rho * pc  # rho = the maintenance and management cost coefficient = $ 800 / charger
             P_G = (Alpha * 0.00526 + (1 - Alpha) * 0.05) * VMT  # (alternative electricity + general electricity fees) * VMT
@@ -500,10 +506,10 @@ class ChicagoMultiPolicyMap(Env):
             self.time_step = 0
 
             # Update the main and sub MAP environment through learning things.
-            self.sub_MAP[2, x, y] = 0
-            self.main_MAP[0, x, y] = capacity
-            self.main_MAP[1, x, y] = -16
-            self.sub_MAP[3, x, y] = capacity
+            self.sub_MAP[2, y, x] = 0
+            self.main_MAP[0, y, x] = capacity
+            self.main_MAP[1, y, x] = -16
+            self.sub_MAP[3, y, x] = capacity
             self.action_record = np.append(self.action_record, self.temp_action_record[-1], axis=0)
             converted_VMT_indices = current_position + (VMT_indices - observation_position)  ## VMT indices in main
             converted_PE_indices = current_position + (PE_indices - observation_position)  ## PE indices in main
@@ -512,17 +518,17 @@ class ChicagoMultiPolicyMap(Env):
             while capacity_ > 0:
                 for a, b in converted_VMT_indices:
                     capacity_ -= (self.main_MAP[0, a, b] * 0.28 / 4.56)
-                    self.main_MAP[0, a, b] *= (1 - 0.28)
-                    if capacity_ <= 0 or converted_VMT_indices[-1] == (a, b):
+                    self.main_MAP[0, b, a] *= (1 - 0.28)
+                    if capacity_ <= 0 or converted_VMT_indices[-1] == (b, a):
                         service_radius = np.linalg.norm(action_group -(a,b))
                         self.service_radius_list.append(service_radius)
                         break
 
             while capacity__ > 0:
                 for a, b in converted_PE_indices:
-                    capacity__ -= self.main_MAP[0, a, b]
-                    self.main_MAP[0, a, b] = 0
-                    self.main_MAP[1, a, b] = 0
+                    capacity__ -= self.main_MAP[0, b, a]
+                    self.main_MAP[0, b, a] = 0
+                    self.main_MAP[1, b, a] = 0
                     if capacity__ <= 0 or converted_PE_indices[-1] == (a, b):
                         break
             self.episode += 1
