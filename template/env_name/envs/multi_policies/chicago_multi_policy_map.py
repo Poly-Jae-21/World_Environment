@@ -17,16 +17,16 @@ from template.env_name.envs.utils.data_conversion import Polygon_to_matrix, Dens
 WINDOW_SIZE = [3420, 4207]
 
 def generate_partial_observation(agent_position, MAP):
-    p_observation_map = np.zeros([1, 100, 100])
-    information_position_map = np.zeros([1, 100, 100])
+    p_observation_map = np.zeros([100, 100])
+    information_position_map = np.zeros([100, 100])
     for i in range(0,100):
         for j in range(0,100):
             x_val, y_val = int(agent_position[0]), int(agent_position[1])
             if x_val +i - 50 <= 0 or x_val +i + 50 >= WINDOW_SIZE[1] or y_val +j - 50 <= 0 or y_val +j + 50 >= WINDOW_SIZE[0]:
                 continue
             else:
-                p_observation_map[0, i, j] = MAP[0, x_val+i-50, y_val+j-50]
-                information_position_map[0, i, j] = MAP[1, x_val+i-50, y_val+j-50]
+                p_observation_map[i, j] = MAP[0, x_val+i-50, y_val+j-50]
+                information_position_map[i, j] = MAP[1, x_val+i-50, y_val+j-50]
     return p_observation_map, information_position_map
 
 
@@ -96,7 +96,7 @@ class ChicagoMultiPolicyMap(Env):
 
     def __init__(self, render_mode: Optional[str] = None):
         self.action_space = spaces.Discrete(3)
-        self.observation_space = spaces.Discrete(10201)
+        self.observation_space = spaces.Discrete(10000)
 
         self.time_step = 0
 
@@ -421,7 +421,6 @@ class ChicagoMultiPolicyMap(Env):
                     self.episode += 1
 
             else:
-                print(self.temp_action_record[-1])
                 self.temp_action_record = np.append(self.temp_action_record, self.temp_action_record[-1].reshape(1,-1).astype(int), axis=0)
                 done = False
                 terminate = False
@@ -619,13 +618,15 @@ class ChicagoMultiPolicyMap(Env):
                             self.sub_MAP[3, x, y] = capacity
                             self.action_record = np.append(self.action_record, self.temp_action_record[-1], axis=0)
 
-                            converted_VMT_indices = current_position + (VMT_indices - observation_position)  ## VMT indices in main
+                            converted_VMT_indices = (action_group + (
+                                    VMT_indices - observation_position)).astype('int32')  ## VMT indices in main
                             capacity_ = capacity
                             while capacity_ > 0:
                                 for a, b in converted_VMT_indices:
                                     if capacity_ <= 0:
                                         break
-                                    capacity_ -= (self.scalar_VMT.inverse_transform(self.main_MAP[0, a, b]) * 0.28 / 4.56)
+                                    capacity_ -= (self.scalar_VMT.inverse_transform(
+                                        self.main_MAP[0, a, b].reshape(-1, 1)) * 0.28 / 4.56)
                                     self.main_MAP[0, a, b] *= (1 - 0.28)
                                     if capacity_ <= 0:
                                         service_radius = np.linalg.norm(action_group - (a, b))
@@ -634,13 +635,15 @@ class ChicagoMultiPolicyMap(Env):
                                     break
 
                             if PE_indices is not None:
-                                converted_PE_indices = current_position + (PE_indices - observation_position)  ## PE indices in main
+                                converted_PE_indices = (action_group + (
+                                        PE_indices - observation_position)).astype('int32')  ## PE indices in main
                                 capacity__ = capacity
                                 while capacity__ > 0:
                                     for a, b in converted_PE_indices:
                                         if capacity__ <= 0:
                                             break
-                                        capacity__ = capacity__ - self.scalar_PE.inverse_transform(self.main_MAP[0, a, b])
+                                        capacity__ = capacity__ - self.scalar_PE.inverse_transform(
+                                            self.main_MAP[0, a, b].reshape(-1, 1))
                                         if capacity__ <= 0:
                                             self.main_MAP[0, a, b] = self.scalar_PE.fit_transform(capacity__)
                                         else:
@@ -660,18 +663,15 @@ class ChicagoMultiPolicyMap(Env):
                             self.main_MAP[0, x, y] = capacity / 72000
                             self.main_MAP[1, x, y] = -16
                             self.sub_MAP[3, x, y] = capacity
-                            self.action_record = np.append(self.action_record, self.temp_action_record[-1],
-                                                           axis=0)
 
-                            converted_VMT_indices = current_position + (
-                                        VMT_indices - observation_position)  ## VMT indices in main
+                            converted_VMT_indices = (action_group + (
+                                        VMT_indices - observation_position)).astype('int32')  ## VMT indices in main
                             capacity_ = capacity
                             while capacity_ > 0:
                                 for a, b in converted_VMT_indices:
                                     if capacity_ <= 0:
                                         break
-                                    capacity_ -= (self.scalar_VMT.inverse_transform(
-                                        self.main_MAP[0, a, b]) * 0.28 / 4.56)
+                                    capacity_ -= (self.scalar_VMT.inverse_transform(self.main_MAP[0, a, b].reshape(-1,1)) * 0.28 / 4.56)
                                     self.main_MAP[0, a, b] *= (1 - 0.28)
                                     if capacity_ <= 0:
                                         service_radius = np.linalg.norm(action_group - (a, b))
@@ -680,15 +680,15 @@ class ChicagoMultiPolicyMap(Env):
                                     break
 
                             if PE_indices is not None:
-                                converted_PE_indices = current_position + (
-                                            PE_indices - observation_position)  ## PE indices in main
+                                converted_PE_indices = (action_group + (
+                                            PE_indices - observation_position)).astype('int32')  ## PE indices in main
                                 capacity__ = capacity
                                 while capacity__ > 0:
                                     for a, b in converted_PE_indices:
                                         if capacity__ <= 0:
                                             break
                                         capacity__ = capacity__ - self.scalar_PE.inverse_transform(
-                                            self.main_MAP[0, a, b])
+                                            self.main_MAP[0, a, b].reshape(-1,1))
                                         if capacity__ <= 0:
                                             self.main_MAP[0, a, b] = self.scalar_PE.fit_transform(capacity__)
                                         else:
@@ -724,16 +724,17 @@ class ChicagoMultiPolicyMap(Env):
                         self.sub_MAP[3, x, y] = capacity
                         self.action_record = np.append(self.action_record, self.temp_action_record[-1],
                                                        axis=0)
+                        self.temp_action_record = np.array([[0, 0, 0]])
 
-                        converted_VMT_indices = current_position + (
-                                VMT_indices - observation_position)  ## VMT indices in main
+                        converted_VMT_indices = (action_group + (
+                                VMT_indices - observation_position)).astype('int32')  ## VMT indices in main
                         capacity_ = capacity
                         while capacity_ > 0:
                             for a, b in converted_VMT_indices:
                                 if capacity_ <= 0:
                                     break
                                 capacity_ -= (self.scalar_VMT.inverse_transform(
-                                    self.main_MAP[0, a, b]) * 0.28 / 4.56)
+                                    self.main_MAP[0, a, b].reshape(-1, 1)) * 0.28 / 4.56)
                                 self.main_MAP[0, a, b] *= (1 - 0.28)
                                 if capacity_ <= 0:
                                     service_radius = np.linalg.norm(action_group - (a, b))
@@ -742,15 +743,15 @@ class ChicagoMultiPolicyMap(Env):
                                 break
 
                         if PE_indices is not None:
-                            converted_PE_indices = current_position + (
-                                    PE_indices - observation_position)  ## PE indices in main
+                            converted_PE_indices = (action_group + (
+                                    PE_indices - observation_position)).astype('int32')  ## PE indices in main
                             capacity__ = capacity
                             while capacity__ > 0:
                                 for a, b in converted_PE_indices:
                                     if capacity__ <= 0:
                                         break
                                     capacity__ = capacity__ - self.scalar_PE.inverse_transform(
-                                        self.main_MAP[0, a, b])
+                                        self.main_MAP[0, a, b].reshape(-1, 1))
                                     if capacity__ <= 0:
                                         self.main_MAP[0, a, b] = self.scalar_PE.fit_transform(capacity__)
                                     else:
@@ -772,18 +773,16 @@ class ChicagoMultiPolicyMap(Env):
                         self.main_MAP[0, x, y] = capacity / 72000
                         self.main_MAP[1, x, y] = -16
                         self.sub_MAP[3, x, y] = capacity
-                        self.action_record = np.append(self.action_record, self.temp_action_record[-1],
-                                                       axis=0)
 
-                        converted_VMT_indices = current_position + (
-                                VMT_indices - observation_position)  ## VMT indices in main
+                        converted_VMT_indices = (action_group + (
+                                VMT_indices - observation_position)).astype('int32')  ## VMT indices in main
                         capacity_ = capacity
                         while capacity_ > 0:
                             for a, b in converted_VMT_indices:
                                 if capacity_ <= 0:
                                     break
                                 capacity_ -= (self.scalar_VMT.inverse_transform(
-                                    self.main_MAP[0, a, b]) * 0.28 / 4.56)
+                                    self.main_MAP[0, a, b].reshape(-1, 1)) * 0.28 / 4.56)
                                 self.main_MAP[0, a, b] *= (1 - 0.28)
                                 if capacity_ <= 0:
                                     service_radius = np.linalg.norm(action_group - (a, b))
@@ -792,15 +791,15 @@ class ChicagoMultiPolicyMap(Env):
                                 break
 
                         if PE_indices is not None:
-                            converted_PE_indices = current_position + (
-                                    PE_indices - observation_position)  ## PE indices in main
+                            converted_PE_indices = (action_group + (
+                                    PE_indices - observation_position)).astype('int32')  ## PE indices in main
                             capacity__ = capacity
                             while capacity__ > 0:
                                 for a, b in converted_PE_indices:
                                     if capacity__ <= 0:
                                         break
                                     capacity__ = capacity__ - self.scalar_PE.inverse_transform(
-                                        self.main_MAP[0, a, b])
+                                        self.main_MAP[0, a, b].reshape(-1, 1))
                                     if capacity__ <= 0:
                                         self.main_MAP[0, a, b] = self.scalar_PE.fit_transform(capacity__)
                                     else:
@@ -810,6 +809,7 @@ class ChicagoMultiPolicyMap(Env):
                                     break
 
                 else: ## it is for local-multi-policies, not update the environment in max_timesteps
+                    self.time_step = 0
                     terminate = False
                     self.temp_action_record = np.array([[0, 0, 0]])
 
