@@ -197,7 +197,7 @@ class Density():
         densitys = []
         for i in range(len(self.c)):
             gaussian_kernels = []
-            action_records = np.argwhere(sub_map[1] != 0)
+            action_records = np.argwhere(sub_map[0] != 0)
             for j in range(len(action_records)):
                 dist_i_j = np.linalg.norm(self.c[i] - action_records[j])
                 if dist_i_j <= radius:

@@ -320,8 +320,10 @@ class ChicagoMultiPolicyMap(Env):
         """
         self.time_step = 0
         self.initial_position = np.array([0, 0])
+        self.episode += 1
+        print("episode" + str(self.episode) + " in environment")
 
-        if self.episode == 0:
+        if self.episode == 1:
             select_community = random.randint(1,77)
             self.main_MAP, self.sub_MAP = self.Mapping()
             initial_position_list = np.argwhere(self.sub_MAP[0,...] == select_community)
@@ -333,13 +335,14 @@ class ChicagoMultiPolicyMap(Env):
 
                 initial_observation, _ = generate_partial_observation(selected_initial_starting_point, self.main_MAP)
                 info = {"community": select_community, "initial_position": self.initial_position.tolist()}
+                initial_observation = np.reshape(initial_observation, [1, 10000])
                 return initial_observation, info
             else:
                 print("No positions with the value 3 found")
                 info = {"error": f"No valid positions in community {select_community}"}
                 return None, info
 
-        elif 1 <= self.episode <= 31:
+        elif 2 <= self.episode <= 30:
             while True:
                 select_community = random.randint(1,77)
                 medium_position_list = np.argwhere( self.sub_MAP[0,...] == select_community)
@@ -357,6 +360,7 @@ class ChicagoMultiPolicyMap(Env):
                         self.initial_position = selected_medium_position
                         self.temp_action_record = np.hstack((self.initial_position, np.array([0])))
                         info = {"community": select_community, "initial_position": self.initial_position.tolist()}
+                        medium_observation = np.reshape(medium_observation, [1, 10000])
                         return medium_observation, info
 
         else:
@@ -406,19 +410,17 @@ class ChicagoMultiPolicyMap(Env):
             next_observation, _ = generate_partial_observation(current_position, self.main_MAP)
             info = {}
 
-            if self.episode == 5000 and self.time_step == self.max_steps:
+            if self.episode+1 == 5000 and self.time_step == self.max_steps:
                 self.temp_action_record = np.array([[0,0,0]])
                 self.time_step = 0
                 done = True
                 terminate = True
 
-            elif self.episode != 5000 and self.time_step == self.max_steps:
+            elif self.episode+1 != 5000 and self.time_step == self.max_steps:
                 self.temp_action_record = np.array([[0, 0, 0]])
                 self.time_step = 0
                 done = True
                 terminate = False
-                if factor is None:
-                    self.episode += 1
 
             else:
                 self.temp_action_record = np.append(self.temp_action_record, self.temp_action_record[-1].reshape(1,-1).astype(int), axis=0)
@@ -432,19 +434,18 @@ class ChicagoMultiPolicyMap(Env):
             r = -1
             next_observation, _ = generate_partial_observation(current_position, self.main_MAP)
             info = {}
-            if self.episode == 5000 and self.time_step == self.max_steps:
+            if self.episode+1 == 5000 and self.time_step == self.max_steps:
                 self.temp_action_record = np.array([[0,0,0]])
                 self.time_step = 0
                 done = True
                 terminate = True
 
-            elif self.episode != 5000 and self.time_step == self.max_steps:
+            elif self.episode+1 != 5000 and self.time_step == self.max_steps:
                 self.temp_action_record = np.array([[0, 0, 0]])
                 self.time_step = 0
                 done = True
                 terminate = False
-                if factor is None:
-                    self.episode += 1
+
 
             else:
                 self.temp_action_record = np.append(self.temp_action_record, self.temp_action_record[-1].reshape(1,-1).astype(int), axis=0)
@@ -608,7 +609,7 @@ class ChicagoMultiPolicyMap(Env):
                     self.time_step = 0
 
                     if factor is None: ## stop the rollout and update the environment
-                        if self.episode == 5000: ## Terminate = True and stop the training
+                        if self.episode+1 == 5000: ## Terminate = True and stop the training
                             terminate = True
 
                             # Update the main and sub MAP environment through learning things.
@@ -699,7 +700,7 @@ class ChicagoMultiPolicyMap(Env):
 
                     else: ## stop the rollout in local policies
                         self.temp_action_record = np.array([[0, 0, 0]])
-                        if self.episode == 5000:
+                        if self.episode+1 == 5000:
                             terminate = True
                         else:
                             terminate = False
@@ -714,7 +715,7 @@ class ChicagoMultiPolicyMap(Env):
                 self.time_step = 0
                 done = True
                 if factor is None: ## Meta learner -> Update the environment in max_timestep
-                    if self.episode == 5000: ## Terminate = True
+                    if self.episode+1 == 5000: ## Terminate = True
                         terminate = True
 
                         # Update the main and sub MAP environment through learning things.
@@ -762,7 +763,6 @@ class ChicagoMultiPolicyMap(Env):
 
                     else: ## Terminate = False, but update the environment
                         terminate = False
-                        self.episode += 1
 
                         self.action_record = np.append(self.action_record, self.temp_action_record, axis=0)
                         self.temp_action_record = np.array([[0, 0, 0]])
