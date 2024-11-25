@@ -9,19 +9,57 @@ import random
 import pygame
 from os import path
 
+from sklearn.preprocessing import MinMaxScaler
+
 from template.env_name.envs.utils.action import Action
 from template.env_name.envs.utils.data_conversion import Polygon_to_matrix, Density
 
 WINDOW_SIZE = [3420, 4207]
 
 def generate_partial_observation(agent_position, MAP):
-    p_observation_map = MAP[0, -50 + agent_position[0]: 50 + agent_position[0], -50 + agent_position[1]: 50 + agent_position[1]]
-    information_position_map = MAP[1, -50 + agent_position[0]: 50 + agent_position[0], -50 + agent_position[1]: 50 + agent_position[1]]
+    p_observation_map = np.zeros([1, 100, 100])
+    information_position_map = np.zeros([1, 100, 100])
+    for i in range(0,100):
+        for j in range(0,100):
+            x_val, y_val = int(agent_position[0]), int(agent_position[1])
+            if x_val +i - 50 <= 0 or x_val +i + 50 >= WINDOW_SIZE[1] or y_val +j - 50 <= 0 or y_val +j + 50 >= WINDOW_SIZE[0]:
+                continue
+            else:
+                p_observation_map[0, i, j] = MAP[0, x_val+i-50, y_val+j-50]
+                information_position_map[0, i, j] = MAP[1, x_val+i-50, y_val+j-50]
     return p_observation_map, information_position_map
+
+
+def generate_partial_observation_sub(agent_position, sub_MAP):
+    p_observation_map = np.zeros([4, 100, 100])
+    for i in range(0, 100):
+        for j in range(0, 100):
+            x_val, y_val = int(agent_position[0]), int(agent_position[1])
+            if x_val + i - 50 <= 0 or x_val + i + 50 >= WINDOW_SIZE[1] or y_val + j - 50 <= 0 or y_val + j + 50 >= WINDOW_SIZE[0]:
+                continue
+            else:
+                p_observation_map[:, i, j] = sub_MAP[:, x_val + i - 50, y_val + j - 50]
+
+    return p_observation_map
+
+'''
+def generate_partial_observation(agent_position, MAP):
+    if agent_position[0] - 50 < 0 or agent_position[0] + 50 > WINDOW_SIZE[1] or agent_position[1] - 50 < 0 or agent_position[1] + 50 > WINDOW_SIZE[0]:
+        p_observation_map = np.zeros([2,100,100])
+        p_observation_map_ = p_observation_map + MAP[0, -50 + agent_position[0]: 50 + agent_position[0], -50 + agent_position[1]: 50 + agent_position[1]]
+        information_position_map = p_observation_map + MAP[1, -50 + agent_position[0]: 50 + agent_position[0], -50 + agent_position[1]: 50 + agent_position[1]]
+        return p_observation_map_, information_position_map
+    else:
+        p_observation_map_ =  MAP[0, -50 + agent_position[0]: 50 + agent_position[0],-50 + agent_position[1]: 50 + agent_position[1]]
+        information_position_map = MAP[1, -50 + agent_position[0]: 50 + agent_position[0],-50 + agent_position[1]: 50 + agent_position[1]]
+        return p_observation_map_, information_position_map
 
 def generate_partial_observation_sub(agent_position, sub_MAP):
     p_observation_map = sub_MAP[:,-50 + agent_position[0]: 50 + agent_position[0], -50 + agent_position[1]: 50 + agent_position[1]]
     return p_observation_map
+
+'''
+
 
 class ChicagoMultiPolicyMap(Env):
     """
@@ -58,11 +96,13 @@ class ChicagoMultiPolicyMap(Env):
 
     def __init__(self, render_mode: Optional[str] = None):
         self.action_space = spaces.Discrete(3)
-        self.observation_space = spaces.Discrete(10000)
+        self.observation_space = spaces.Discrete(10201)
 
         self.time_step = 0
-        self.main_MAP = None
+
+        self.main_MAP = None ## These are for communicating with local policies and meta policy and updating through meta policy.
         self.sub_MAP = None
+
         self.episode = 0
         self.initial_position = 0
         self.position_record = []
@@ -76,6 +116,12 @@ class ChicagoMultiPolicyMap(Env):
 
         self.Den = 0
         self.radius = 0
+
+        self.scalar_VMT = MinMaxScaler(feature_range=(0, 1))
+        self.scalar_PE = MinMaxScaler(feature_range=(0, 1))
+
+        self.normalized_VMT = None
+        self.normalized_PE = None
 
         # pygame utils
         self.window = None
@@ -205,30 +251,37 @@ class ChicagoMultiPolicyMap(Env):
         MAP = np.zeros(shape=(2, self.boundary_y + 1, self.boundary_x + 1))
         sub_MAP = np.zeros(shape=(4, self.boundary_y + 1, self.boundary_x + 1))
 
+        VMT = np.array(obj5.iloc[:, -4]).reshape(-1, 1)
+        self.normalized_VMT = self.scalar_VMT.fit_transform(VMT)
+
+        PE = np.array(obj6.iloc[:, -4]).reshape(-1, 1)
+        self.normalized_PE = self.scalar_PE.fit_transform(PE)
+
+
         for ii in range(len(obj5)):
             x_val, y_val = int(obj5.iloc[ii, -2]), int(obj5.iloc[ii, -1])
-            VMT = obj5.iloc[ii, -4]
+
             info = -1
             if x_val > self.boundary_x or x_val < 0 or y_val > self.boundary_y or y_val < 0:
                 continue
             else:
-                MAP[0, self.boundary_y - y_val, x_val] = VMT
+                MAP[0, self.boundary_y - y_val, x_val] = self.normalized_VMT[ii]
                 MAP[1, self.boundary_y - y_val, x_val] = info
 
         for ii in range(len(obj6)):
             x_val, y_val = int(obj6.iloc[ii, -2]), int(obj6.iloc[ii, -1])
-            PE = obj6.iloc[ii, -4]
+
             info = -8
             if x_val > self.max_x or x_val < 0 or y_val > self.max_y or y_val < 0:
                 continue
             else:
-                MAP[0, self.boundary_y - y_val, x_val] = PE
+                MAP[0, self.boundary_y - y_val, x_val] = self.normalized_PE[ii]
                 MAP[1, self.boundary_y - y_val, x_val] = info
 
-        MAP[0, :obj7.shape[0], MAP.shape[2] - obj7.shape[1]:] = obj7 + MAP[0, :obj7.shape[0], MAP.shape[2]-obj7.shape[1]:]
+        MAP[0, :obj7.shape[0], MAP.shape[2] - obj7.shape[1]:] = obj7/(-16) + MAP[0, :obj7.shape[0], MAP.shape[2]-obj7.shape[1]:]
         MAP[1, :obj7.shape[0], MAP.shape[2] - obj7.shape[1]:] = obj7 + MAP[1, :obj7.shape[0], MAP.shape[2] - obj7.shape[1]:]
 
-        MAP[0, :obj4.shape[0], MAP.shape[2] - obj4.shape[1]:] = obj4 + MAP[0, :obj4.shape[0], MAP.shape[2] - obj4.shape[1]:]
+        MAP[0, :obj4.shape[0], MAP.shape[2] - obj4.shape[1]:] = obj4/(-16) + MAP[0, :obj4.shape[0], MAP.shape[2] - obj4.shape[1]:]
         MAP[1, :obj4.shape[0], MAP.shape[2] - obj4.shape[1]:] = obj4 + MAP[1, :obj4.shape[0], MAP.shape[2] - obj4.shape[1]:]
 
         sub_MAP[0, :obj1.shape[0], sub_MAP.shape[2] - obj1.shape[1]:] = obj1
@@ -295,7 +348,10 @@ class ChicagoMultiPolicyMap(Env):
                     selected_medium_position = np.array(i)
                     medium_observation, medium_indices = generate_partial_observation(selected_medium_position, self.main_MAP)
                     VMT_indices = np.argwhere(medium_observation == -1)
-                    total_VMT = np.sum([medium_observation[x, y] for x, y in VMT_indices]) / 4.56
+
+                    VMT_values = [medium_observation[x, y] for x, y in VMT_indices]
+                    VMT_values = np.array([value for value in VMT_values if value != 0]).reshape(-1, 1)
+                    total_VMT = 0.28 * np.sum(VMT_values) / 4.56
 
                     if total_VMT >= 12000:
                         self.initial_position = selected_medium_position
@@ -316,7 +372,7 @@ class ChicagoMultiPolicyMap(Env):
                     selected_high_position = np.array(i)
                     high_observation, high_indices = generate_partial_observation(selected_high_position, self.main_MAP)
                     VMT_indices = np.argwhere(high_observation == -1)
-                    total_VMT = np.sum([high_observation[x, y] for x, y in VMT_indices]) / 4.56
+                    total_VMT = np.sum(self.scalar_VMT.inverse_transform([high_observation[x, y] for x, y in VMT_indices])) / 4.56
                     if total_VMT >= 12000 and i <= len(high_positions_list) - 1:
                         self.initial_position = selected_high_position
                         self.temp_action_record = np.hstack((self.initial_position, np.array([0])))
@@ -329,13 +385,10 @@ class ChicagoMultiPolicyMap(Env):
             self.factor = factor
             current_position = self.initial_position
             converted_action = Action(self.boundary_x, self.boundary_y).local_action_converter(current_position, action) # next position
-            self.temp_action_record = np.vstack((self.temp_action_record, converted_action))
         else:
             current_position = self.temp_action_record[-1][0:2]
             converted_action = Action(self.boundary_x, self.boundary_y).local_action_converter(current_position, action)
-            self.temp_action_record = np.vstack((self.temp_action_record, converted_action))
 
-        converted_action = self.temp_action_record[-1]
         action_group = converted_action[0:2].astype(int)
         x, y, capacity = converted_action[0].astype(int), converted_action[1].astype(int), converted_action[2].astype(int)
 
@@ -345,204 +398,423 @@ class ChicagoMultiPolicyMap(Env):
         VMT_indices = np.argwhere(next_observation_position == -1) # charging demand from vehicle miles traveled, refers to the total number of miles traveled by vehicles in a partial observation map as daily.
         VMT_indices = VMT_indices[np.linalg.norm(observation_position - VMT_indices, axis=1) < 50]
         VMT_indices = np.sort(VMT_indices, axis=0)
-        VMT = 0.28 * np.sum([next_observation[y, x] for x, y in VMT_indices])
+        VMT_values = [next_observation[x, y] for x, y in VMT_indices]
+        VMT_values = np.array([value for value in VMT_values if value != 0]).reshape(-1,1)
 
-        PE_indices = np.argwhere(next_observation_position == -8)
-        PE_indices = PE_indices[np.linalg.norm(observation_position - PE_indices, axis=1) < 50]
-        PE_indices = np.sort(PE_indices, axis=0)
-        PE = np.sum([next_observation[y, x] for x, y in PE_indices])
-
-        # alpha = the ratio of replaced electric resources to alternative sources.
-        if PE >= capacity:
-            Alpha = 1
-        else:
-            Alpha = (capacity - PE) / capacity # 0 ~ 1
-
-        # Reward function for first policy of environment factor
-        if factor == 'environment':
-
-            observation_map_for_avm = observation_for_subMap[2,...]
-            avm_indices = np.argwhere( observation_map_for_avm != 0)
-            avm = np.average([observation_map_for_avm[y,x] for x, y in avm_indices]) # average of vegetation in observation map
-            viss = observation_map_for_avm[50, 50]  # loss of vegetation cover in selected site after installation EVCSs
-
-            r_apr = VMT * 1/21.79 * 23.7 - VMT * 1/4.56 * 0.72576
-            r_eser = Alpha * VMT * 1/4.56 * 0.72576
-            r_TER = r_apr + r_eser # r_TER = total emission reduction, r_apr = Air pollution reduction, r_eser = electricity sources emission reduction by replacing with solar energy
-
-            R_e = r_TER * math.exp(-avm) * math.exp(self.vegetation_percentage_max - viss)
-
-            r = R_e
-
+        if len(VMT_values) ==0:
+            r = -1
+            next_observation, _ = generate_partial_observation(current_position, self.main_MAP)
             info = {}
 
-        elif factor == 'economic':
-
-            if capacity <= 0:
-                z = 0
-            else:
-                z = round(capacity / 6000)
-            rho = 800
-
-            pc = 20600
-
-            F_z = z * rho * pc # rho = the maintenance and management cost coefficient = $ 800 / charger
-            P_G = (Alpha * 0.00526 + (1 - Alpha) * 0.05) * VMT    # (alternative electricity + general electricity fees) * VMT
-            P_z = (F_z / VMT) - P_G # input costs per charging demand and electricity profit
-            R_ec = 1 / P_z # maximization of the profit of EV charging network investor
-
-            r = R_ec
-
-            info = {}
-
-        elif factor == 'urbanity':
-
-            main_road_info = np.argwhere(next_observation_position == -2)
-            if len(main_road_info) > 0:
-                r_drn = 1
-            else:
-                r_drn = 0
-
-            if Alpha == 1:
-                r_dg = 1
-            else:
-                PowerLine_info = np.argwhere(next_observation_position == -4)
-                PowerLine_info = PowerLine_info[np.linalg.norm(observation_position - PowerLine_info, axis=1) < 25]
-
-                if len(PowerLine_info) > 0:
-                    r_dg = 0.5
-                else:
-                    r_dg = 0
-
-            if self.sub_MAP[1, y,x] == 1:
-                r_lu = 1
-            else:
-                r_lu = 0
-
-            if capacity >= (VMT / 4.56):
-                r_sc = 1
-            else:
-                r_sc = 0
-
-
-            R_u = r_drn + r_dg + r_lu + r_sc
-            r = R_u
-
-            info = {}
-
-        else:
-            observation_map_for_avm = observation_for_subMap[2,...]
-            avm_indices = np.argwhere(observation_map_for_avm != 0)
-            avm = np.average([observation_map_for_avm[y, x] for x, y in avm_indices])  # average of vegetation in observation map
-            viss = observation_map_for_avm[50, 50]  # loss of vegetation cover in selected site after installation EVCSs
-
-            r_apr = VMT * 1 / 21.79 * 23.7 - VMT * 1 / 4.56 * 0.72576
-            r_eser = Alpha * VMT * 1 / 4.56 * 0.72576
-            r_TER = r_apr + r_eser  # r_TER = total emission reduction, r_apr = Air pollution reduction, r_eser = electricity sources emission reduction by replacing with solar energy
-
-            R_e = r_TER * math.exp(-avm) * math.exp(self.vegetation_percentage_max - viss)
-
-            if capacity <= 0:
-                z = 0
-            else:
-                z = round(capacity / 3000)
-            rho = 800
-
-            pc = 20600
-
-            F_z = z * rho * pc  # rho = the maintenance and management cost coefficient = $ 800 / charger
-            P_G = (Alpha * 0.00526 + (1 - Alpha) * 0.05) * VMT  # (alternative electricity + general electricity fees) * VMT
-            P_z = (F_z / VMT) - P_G  # input costs per charging demand and electricity profit
-            R_ec = 1 / P_z  # maximization of the profit of EV charging network investor
-
-            main_road_info = np.argwhere(next_observation_position == -2)
-            if len(main_road_info) > 0:
-                r_drn = 1
-            else:
-                r_drn = 0
-
-            if Alpha == 1:
-                r_dg = 1
-            else:
-                PowerLine_info = np.argwhere(next_observation_position == -4)
-                PowerLine_info = PowerLine_info[np.linalg.norm(observation_position - PowerLine_info, axis=1) < 25]
-
-                if len(PowerLine_info) > 0:
-                    r_dg = 0.5
-                else:
-                    r_dg = 0
-
-            if self.sub_MAP[1, x, y] == 1:
-                r_lu = 1
-            else:
-                r_lu = 0
-
-            if capacity >= (VMT / 4.56):
-                r_sc = 1
-            else:
-                r_sc = 0
-
-            R_u = r_drn + r_dg + r_lu + r_sc
-
-            r = R_e + R_ec + R_u
-            info = {"reward_1": R_e, "reward_2": R_ec, "reward_3": R_u, "overall_reward": r}
-
-
-        if self.time_step == self.max_steps:
-            done = True
-            r = r
-            terminate = False
-            self.time_step = 0
-
-        elif factor is None and self.time_step != self.max_steps:
-            done = False
-            r = r
-            self.time_step += 1
-            terminate = False
-
-        elif factor is None and self.time_step == self.max_steps:
-            done = True
-            r = r
-            self.time_step = 0
-
-            # Update the main and sub MAP environment through learning things.
-            self.sub_MAP[2, y, x] = 0
-            self.main_MAP[0, y, x] = capacity
-            self.main_MAP[1, y, x] = -16
-            self.sub_MAP[3, y, x] = capacity
-            self.action_record = np.append(self.action_record, self.temp_action_record[-1], axis=0)
-            converted_VMT_indices = current_position + (VMT_indices - observation_position)  ## VMT indices in main
-            converted_PE_indices = current_position + (PE_indices - observation_position)  ## PE indices in main
-
-            capacity_, capacity__ = capacity, capacity
-            while capacity_ > 0:
-                for a, b in converted_VMT_indices:
-                    capacity_ -= (self.main_MAP[0, a, b] * 0.28 / 4.56)
-                    self.main_MAP[0, b, a] *= (1 - 0.28)
-                    if capacity_ <= 0 or converted_VMT_indices[-1] == (b, a):
-                        service_radius = np.linalg.norm(action_group -(a,b))
-                        self.service_radius_list.append(service_radius)
-                        break
-
-            while capacity__ > 0:
-                for a, b in converted_PE_indices:
-                    capacity__ -= self.main_MAP[0, b, a]
-                    self.main_MAP[0, b, a] = 0
-                    self.main_MAP[1, b, a] = 0
-                    if capacity__ <= 0 or converted_PE_indices[-1] == (a, b):
-                        break
-            self.episode += 1
-            if self.episode == 5000:
+            if self.episode == 5000 and self.time_step == self.max_steps:
+                self.temp_action_record = np.array([[0,0,0]])
+                self.time_step = 0
+                done = True
                 terminate = True
-            else:
-                terminate = False
-        else:
-            done = False
-            terminate = False
-            r = r
-            self.time_step += 1
 
-        return next_observation, r, done, terminate, info
+            elif self.episode != 5000 and self.time_step == self.max_steps:
+                self.temp_action_record = np.array([[0, 0, 0]])
+                self.time_step = 0
+                done = True
+                terminate = False
+                if factor is None:
+                    self.episode += 1
+
+            else:
+                print(self.temp_action_record[-1])
+                self.temp_action_record = np.append(self.temp_action_record, self.temp_action_record[-1].reshape(1,-1).astype(int), axis=0)
+                done = False
+                terminate = False
+                self.time_step += 1
+
+            return next_observation, r, done, terminate, info
+
+        elif x < 60 or x > 3360 or y < 60 or y > 4147:
+            r = -1
+            next_observation, _ = generate_partial_observation(current_position, self.main_MAP)
+            info = {}
+            if self.episode == 5000 and self.time_step == self.max_steps:
+                self.temp_action_record = np.array([[0,0,0]])
+                self.time_step = 0
+                done = True
+                terminate = True
+
+            elif self.episode != 5000 and self.time_step == self.max_steps:
+                self.temp_action_record = np.array([[0, 0, 0]])
+                self.time_step = 0
+                done = True
+                terminate = False
+                if factor is None:
+                    self.episode += 1
+
+            else:
+                self.temp_action_record = np.append(self.temp_action_record, self.temp_action_record[-1].reshape(1,-1).astype(int), axis=0)
+                done = False
+                terminate = False
+                self.time_step += 1
+            return next_observation, r, done, terminate, info
+
+        else:
+            VMT = 0.28 * np.sum(self.scalar_VMT.inverse_transform(VMT_values))
+
+            PE_indices = np.argwhere(next_observation_position == -8)
+            PE_indices = PE_indices[np.linalg.norm(observation_position - PE_indices, axis=1) < 50]
+            PE_indices = np.sort(PE_indices, axis=0)
+            PE_values = [next_observation[x, y] for x, y in PE_indices]
+            PE_values = np.array([value for value in PE_values if value != 0]).reshape(-1,1)
+
+            if len(PE_values) ==0:
+                PE = 0
+            else:
+                PE = np.sum(self.scalar_PE.inverse_transform(PE_values))
+
+            # alpha = the ratio of replaced electric resources to alternative sources.
+            if PE >= capacity:
+                Alpha = 1
+            else:
+                Alpha = (capacity - PE) / capacity # 0 ~ 1
+
+            # Reward function for first policy of environment factor
+            if factor == 'environment':
+
+                observation_map_for_avm = observation_for_subMap[2,...]
+                avm_indices = np.argwhere( observation_map_for_avm != 0)
+                avm = np.average([observation_map_for_avm[x, y] for x, y in avm_indices]) # average of vegetation in observation map
+                viss = observation_map_for_avm[50, 50]  # loss of vegetation cover in selected site after installation EVCSs
+
+                r_apr = VMT * 1/21.79 * 23.7 - VMT * 1/4.56 * 0.72576
+                r_eser = Alpha * VMT * 1/4.56 * 0.72576
+                r_TER = r_apr + r_eser # r_TER = total emission reduction, r_apr = Air pollution reduction, r_eser = electricity sources emission reduction by replacing with solar energy
+
+                R_e = np.log(r_TER * np.exp(-avm) * np.exp(self.vegetation_percentage_max - viss))
+
+                r = R_e
+
+                info = {}
+
+            elif factor == 'economic':
+
+                if capacity <= 0:
+                    z = 0
+                else:
+                    z = round(capacity / 6000)
+                rho = 800
+
+                pc = 20600
+
+                F_z = z * rho * pc # rho = the maintenance and management cost coefficient = $ 800 / charger
+                P_G = (Alpha * 0.00526 + (1 - Alpha) * 0.05) * VMT    # (alternative electricity + general electricity fees) * VMT
+                P_z = (F_z / VMT) - P_G # input costs per charging demand and electricity profit
+                R_ec = 1 / P_z # maximization of the profit of EV charging network investor
+
+                r = np.exp(R_ec)
+
+                info = {}
+
+            elif factor == 'urbanity':
+
+                main_road_info = np.argwhere(next_observation_position == -2)
+                if len(main_road_info) > 0:
+                    r_drn = 1
+                else:
+                    r_drn = 0
+
+                if Alpha == 1:
+                    r_dg = 1
+                else:
+                    PowerLine_info = np.argwhere(next_observation_position == -4)
+                    PowerLine_info = PowerLine_info[np.linalg.norm(observation_position - PowerLine_info, axis=1) < 25]
+
+                    if len(PowerLine_info) > 0:
+                        r_dg = 0.5
+                    else:
+                        r_dg = 0
+
+                if self.sub_MAP[1, y,x] == 1:
+                    r_lu = 1
+                else:
+                    r_lu = 0
+
+                if capacity >= (VMT / 4.56):
+                    r_sc = 1
+                else:
+                    r_sc = 0
+
+
+                R_u = (r_drn + r_dg + r_lu + r_sc)/4
+                r = R_u
+
+                info = {}
+
+            else:
+                observation_map_for_avm = observation_for_subMap[2,...]
+                avm_indices = np.argwhere(observation_map_for_avm != 0)
+                avm = np.average([observation_map_for_avm[x, y] for x, y in avm_indices])  # average of vegetation in observation map
+                viss = observation_map_for_avm[50, 50]  # loss of vegetation cover in selected site after installation EVCSs
+
+                r_apr = VMT * 1 / 21.79 * 23.7 - VMT * 1 / 4.56 * 0.72576
+                r_eser = Alpha * VMT * 1 / 4.56 * 0.72576
+                r_TER = np.log(r_apr + r_eser) # r_TER = total emission reduction, r_apr = Air pollution reduction, r_eser = electricity sources emission reduction by replacing with solar energy
+
+                R_e = r_TER * math.exp(-avm) * math.exp(self.vegetation_percentage_max - viss)
+
+                if capacity <= 0:
+                    z = 0
+                else:
+                    z = round(capacity / 3000)
+                rho = 800
+
+                pc = 20600
+
+                F_z = z * rho * pc  # rho = the maintenance and management cost coefficient = $ 800 / charger
+                P_G = (Alpha * 0.00526 + (1 - Alpha) * 0.05) * VMT  # (alternative electricity + general electricity fees) * VMT
+                P_z = (F_z / VMT) - P_G  # input costs per charging demand and electricity profit
+                R_ec = np.exp(1 / P_z)  # maximization of the profit of EV charging network investor
+
+                main_road_info = np.argwhere(next_observation_position == -2)
+                if len(main_road_info) > 0:
+                    r_drn = 1
+                else:
+                    r_drn = 0
+
+                if Alpha == 1:
+                    r_dg = 1
+                else:
+                    PowerLine_info = np.argwhere(next_observation_position == -4)
+                    PowerLine_info = PowerLine_info[np.linalg.norm(observation_position - PowerLine_info, axis=1) < 25]
+
+                    if len(PowerLine_info) > 0:
+                        r_dg = 0.5
+                    else:
+                        r_dg = 0
+
+                if self.sub_MAP[1, x, y] == 1:
+                    r_lu = 1
+                else:
+                    r_lu = 0
+
+                if capacity >= (VMT / 4.56):
+                    r_sc = 1
+                else:
+                    r_sc = 0
+
+                R_u = (r_drn + r_dg + r_lu + r_sc)/4
+
+                r = (R_e + R_ec + R_u)/3
+                info = {"reward_1": R_e, "reward_2": R_ec, "reward_3": R_u, "overall_reward": r}
+
+            if self.time_step < self.max_steps:
+                if r >= 3: ## stop the timestep
+                    done = True
+                    self.time_step = 0
+
+                    if factor is None: ## stop the rollout and update the environment
+                        if self.episode == 5000: ## Terminate = True and stop the training
+                            terminate = True
+
+                            # Update the main and sub MAP environment through learning things.
+                            self.sub_MAP[2, x, y] = 0
+                            self.main_MAP[0, x, y] = capacity / 72000
+                            self.main_MAP[1, x, y] = -16
+                            self.sub_MAP[3, x, y] = capacity
+                            self.action_record = np.append(self.action_record, self.temp_action_record[-1], axis=0)
+
+                            converted_VMT_indices = current_position + (VMT_indices - observation_position)  ## VMT indices in main
+                            capacity_ = capacity
+                            while capacity_ > 0:
+                                for a, b in converted_VMT_indices:
+                                    if capacity_ <= 0:
+                                        break
+                                    capacity_ -= (self.scalar_VMT.inverse_transform(self.main_MAP[0, a, b]) * 0.28 / 4.56)
+                                    self.main_MAP[0, a, b] *= (1 - 0.28)
+                                    if capacity_ <= 0:
+                                        service_radius = np.linalg.norm(action_group - (a, b))
+                                        self.service_radius_list.append(service_radius)
+                                else:
+                                    break
+
+                            if PE_indices is not None:
+                                converted_PE_indices = current_position + (PE_indices - observation_position)  ## PE indices in main
+                                capacity__ = capacity
+                                while capacity__ > 0:
+                                    for a, b in converted_PE_indices:
+                                        if capacity__ <= 0:
+                                            break
+                                        capacity__ = capacity__ - self.scalar_PE.inverse_transform(self.main_MAP[0, a, b])
+                                        if capacity__ <= 0:
+                                            self.main_MAP[0, a, b] = self.scalar_PE.fit_transform(capacity__)
+                                        else:
+                                            self.main_MAP[0, a, b] = 0
+                                            self.main_MAP[1, a, b] = 0
+                                    else:
+                                        break
+                        else: ## update the environment in meta policy and keep doing the episode  and stop the rollout
+                            self.episode += 1
+                            self.action_record = np.append(self.action_record, self.temp_action_record, axis=0)
+                            terminate = False
+
+                            self.temp_action_record = np.array([[0, 0, 0]])
+
+                            # Update the main and sub MAP environment through learning things.
+                            self.sub_MAP[2, x, y] = 0
+                            self.main_MAP[0, x, y] = capacity / 72000
+                            self.main_MAP[1, x, y] = -16
+                            self.sub_MAP[3, x, y] = capacity
+                            self.action_record = np.append(self.action_record, self.temp_action_record[-1],
+                                                           axis=0)
+
+                            converted_VMT_indices = current_position + (
+                                        VMT_indices - observation_position)  ## VMT indices in main
+                            capacity_ = capacity
+                            while capacity_ > 0:
+                                for a, b in converted_VMT_indices:
+                                    if capacity_ <= 0:
+                                        break
+                                    capacity_ -= (self.scalar_VMT.inverse_transform(
+                                        self.main_MAP[0, a, b]) * 0.28 / 4.56)
+                                    self.main_MAP[0, a, b] *= (1 - 0.28)
+                                    if capacity_ <= 0:
+                                        service_radius = np.linalg.norm(action_group - (a, b))
+                                        self.service_radius_list.append(service_radius)
+                                else:
+                                    break
+
+                            if PE_indices is not None:
+                                converted_PE_indices = current_position + (
+                                            PE_indices - observation_position)  ## PE indices in main
+                                capacity__ = capacity
+                                while capacity__ > 0:
+                                    for a, b in converted_PE_indices:
+                                        if capacity__ <= 0:
+                                            break
+                                        capacity__ = capacity__ - self.scalar_PE.inverse_transform(
+                                            self.main_MAP[0, a, b])
+                                        if capacity__ <= 0:
+                                            self.main_MAP[0, a, b] = self.scalar_PE.fit_transform(capacity__)
+                                        else:
+                                            self.main_MAP[0, a, b] = 0
+                                            self.main_MAP[1, a, b] = 0
+                                    else:
+                                        break
+
+                    else: ## stop the rollout in local policies
+                        self.temp_action_record = np.array([[0, 0, 0]])
+                        if self.episode == 5000:
+                            terminate = True
+                        else:
+                            terminate = False
+                else: ## Keep doing the rollout in both local policies and meta policy
+                    terminate = False
+                    converted_action = converted_action.reshape(1,-1)
+                    self.temp_action_record = np.append(self.temp_action_record, converted_action, axis=0)
+                    done = False
+                    self.time_step += 1
+
+            else: ## time_step == max_timestep
+                self.time_step = 0
+                done = True
+                if factor is None: ## Meta learner -> Update the environment in max_timestep
+                    if self.episode == 5000: ## Terminate = True
+                        terminate = True
+
+                        # Update the main and sub MAP environment through learning things.
+                        self.sub_MAP[2, x, y] = 0
+                        self.main_MAP[0, x, y] = capacity / 72000
+                        self.main_MAP[1, x, y] = -16
+                        self.sub_MAP[3, x, y] = capacity
+                        self.action_record = np.append(self.action_record, self.temp_action_record[-1],
+                                                       axis=0)
+
+                        converted_VMT_indices = current_position + (
+                                VMT_indices - observation_position)  ## VMT indices in main
+                        capacity_ = capacity
+                        while capacity_ > 0:
+                            for a, b in converted_VMT_indices:
+                                if capacity_ <= 0:
+                                    break
+                                capacity_ -= (self.scalar_VMT.inverse_transform(
+                                    self.main_MAP[0, a, b]) * 0.28 / 4.56)
+                                self.main_MAP[0, a, b] *= (1 - 0.28)
+                                if capacity_ <= 0:
+                                    service_radius = np.linalg.norm(action_group - (a, b))
+                                    self.service_radius_list.append(service_radius)
+                            else:
+                                break
+
+                        if PE_indices is not None:
+                            converted_PE_indices = current_position + (
+                                    PE_indices - observation_position)  ## PE indices in main
+                            capacity__ = capacity
+                            while capacity__ > 0:
+                                for a, b in converted_PE_indices:
+                                    if capacity__ <= 0:
+                                        break
+                                    capacity__ = capacity__ - self.scalar_PE.inverse_transform(
+                                        self.main_MAP[0, a, b])
+                                    if capacity__ <= 0:
+                                        self.main_MAP[0, a, b] = self.scalar_PE.fit_transform(capacity__)
+                                    else:
+                                        self.main_MAP[0, a, b] = 0
+                                        self.main_MAP[1, a, b] = 0
+                                else:
+                                    break
+
+                    else: ## Terminate = False, but update the environment
+                        terminate = False
+                        self.episode += 1
+
+                        self.action_record = np.append(self.action_record, self.temp_action_record, axis=0)
+                        self.temp_action_record = np.array([[0, 0, 0]])
+                        self.time_step = 0
+
+                        # Update the main and sub MAP environment through learning things.
+                        self.sub_MAP[2, x, y] = 0
+                        self.main_MAP[0, x, y] = capacity / 72000
+                        self.main_MAP[1, x, y] = -16
+                        self.sub_MAP[3, x, y] = capacity
+                        self.action_record = np.append(self.action_record, self.temp_action_record[-1],
+                                                       axis=0)
+
+                        converted_VMT_indices = current_position + (
+                                VMT_indices - observation_position)  ## VMT indices in main
+                        capacity_ = capacity
+                        while capacity_ > 0:
+                            for a, b in converted_VMT_indices:
+                                if capacity_ <= 0:
+                                    break
+                                capacity_ -= (self.scalar_VMT.inverse_transform(
+                                    self.main_MAP[0, a, b]) * 0.28 / 4.56)
+                                self.main_MAP[0, a, b] *= (1 - 0.28)
+                                if capacity_ <= 0:
+                                    service_radius = np.linalg.norm(action_group - (a, b))
+                                    self.service_radius_list.append(service_radius)
+                            else:
+                                break
+
+                        if PE_indices is not None:
+                            converted_PE_indices = current_position + (
+                                    PE_indices - observation_position)  ## PE indices in main
+                            capacity__ = capacity
+                            while capacity__ > 0:
+                                for a, b in converted_PE_indices:
+                                    if capacity__ <= 0:
+                                        break
+                                    capacity__ = capacity__ - self.scalar_PE.inverse_transform(
+                                        self.main_MAP[0, a, b])
+                                    if capacity__ <= 0:
+                                        self.main_MAP[0, a, b] = self.scalar_PE.fit_transform(capacity__)
+                                    else:
+                                        self.main_MAP[0, a, b] = 0
+                                        self.main_MAP[1, a, b] = 0
+                                else:
+                                    break
+
+                else: ## it is for local-multi-policies, not update the environment in max_timesteps
+                    terminate = False
+                    self.temp_action_record = np.array([[0, 0, 0]])
+
+            return next_observation, r, done, terminate, info
+
 
     def render(self):
         if self.render_mode == "human":
