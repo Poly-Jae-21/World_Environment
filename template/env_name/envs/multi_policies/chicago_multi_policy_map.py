@@ -96,7 +96,7 @@ class ChicagoMultiPolicyMap(Env):
 
     def __init__(self, render_mode: Optional[str] = None):
         self.action_space = spaces.Discrete(3)
-        self.observation_space = spaces.Discrete(10000)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(10000,), dtype=np.float64)
 
         self.time_step = 0
 
@@ -314,14 +314,16 @@ class ChicagoMultiPolicyMap(Env):
         output_action = np.hstack((x_extent, y_extent, capacity))
         return output_action
 
-    def reset(self):
+    def reset(self,
+        seed: Optional[int] = None,
+        options: Optional[int] = None,):
+
         """
         This is to create environment or set up an initial position and initial partial observation
         """
         self.time_step = 0
         self.initial_position = np.array([0, 0])
-        self.episode += 1
-        print("episode" + str(self.episode) + " in environment")
+        self.episode = options + 1
 
         if self.episode == 1:
             select_community = random.randint(1,77)
@@ -331,57 +333,53 @@ class ChicagoMultiPolicyMap(Env):
                 selected_initial_starting_point = random.choice(initial_position_list)
                 selected_initial_starting_point = np.array(selected_initial_starting_point)
                 self.initial_position = selected_initial_starting_point
-                self.temp_action_record = np.hstack((self.initial_position, np.array([0])))
+                self.temp_action_record = np.hstack(([self.initial_position, np.array([0])]))[np.newaxis, :]
 
                 initial_observation, _ = generate_partial_observation(selected_initial_starting_point, self.main_MAP)
                 info = {"community": select_community, "initial_position": self.initial_position.tolist()}
-                initial_observation = np.reshape(initial_observation, [1, 10000])
-                return initial_observation, info
+                return np.reshape(initial_observation, [1,10000]), info
             else:
                 print("No positions with the value 3 found")
                 info = {"error": f"No valid positions in community {select_community}"}
                 return None, info
 
         elif 2 <= self.episode <= 30:
-            while True:
-                select_community = random.randint(1,77)
-                medium_position_list = np.argwhere( self.sub_MAP[0,...] == select_community)
-                np.random.shuffle(medium_position_list)
-                for i in medium_position_list:
-                    selected_medium_position = np.array(i)
+            select_community = random.randint(1, 77)
+            medium_position_list = np.argwhere(self.sub_MAP[0, ...] == select_community)
+            while medium_position_list.size > 0:
+                if medium_position_list.size > 0:
+                    selected_medium_position = np.array(random.choice(medium_position_list))
                     medium_observation, medium_indices = generate_partial_observation(selected_medium_position, self.main_MAP)
-                    VMT_indices = np.argwhere(medium_observation == -1)
 
-                    VMT_values = [medium_observation[x, y] for x, y in VMT_indices]
-                    VMT_values = np.array([value for value in VMT_values if value != 0]).reshape(-1, 1)
-                    total_VMT = 0.28 * np.sum(VMT_values) / 4.56
-
-                    if total_VMT >= 12000:
-                        self.initial_position = selected_medium_position
-                        self.temp_action_record = np.hstack((self.initial_position, np.array([0])))
-                        info = {"community": select_community, "initial_position": self.initial_position.tolist()}
-                        medium_observation = np.reshape(medium_observation, [1, 10000])
-                        return medium_observation, info
-
+                    self.initial_position = selected_medium_position
+                    self.temp_action_record = np.hstack((self.initial_position, np.array([0])))[np.newaxis, :]
+                    info = {"community": select_community, "initial_position": self.initial_position.tolist()}
+                    return np.reshape(medium_observation, [1,10000]), info
+                else:
+                    print("Non valid positions")
+                    select_community = random.randint(1, 77)
+                    medium_position_list = np.argwhere(self.sub_MAP[0, ...] == select_community)
         else:
             Density_weight = self.Den.KernelDensity(self.radius, self.sub_MAP)
             updated_weight_list = 1 / (np.exp(Density_weight) + 77) ## 77 = The number of community areas in Chicago
             self.probability_list = updated_weight_list / np.sum(updated_weight_list)
+            selected_community = random.choices(population=[i+1 for i in range(77)], weights=self.probability_list, k=1)[0]
+            high_positions_list = np.argwhere(self.sub_MAP[0,...] == selected_community)
+            selected_high_position = np.array(random.choice(high_positions_list))
 
-            while True:
-                selected_community = random.choices(population=[i+1 for i in range(77)], weights=self.probability_list, k=1)[0]
-                high_positions_list = np.argwhere(self.sub_MAP[0,...] == selected_community)
-                np.random.shuffle(high_positions_list)
-                for i in high_positions_list:
-                    selected_high_position = np.array(i)
+            while selected_high_position.size > 0:
+                if selected_high_position.size > 0:
                     high_observation, high_indices = generate_partial_observation(selected_high_position, self.main_MAP)
-                    VMT_indices = np.argwhere(high_observation == -1)
-                    total_VMT = np.sum(self.scalar_VMT.inverse_transform([high_observation[x, y] for x, y in VMT_indices])) / 4.56
-                    if total_VMT >= 12000 and i <= len(high_positions_list) - 1:
-                        self.initial_position = selected_high_position
-                        self.temp_action_record = np.hstack((self.initial_position, np.array([0])))
-                        info = {"community": selected_community, "initial_position": self.initial_position.tolist()}
-                        return high_observation, info
+
+                    self.initial_position = selected_high_position
+                    self.temp_action_record = np.hstack((self.initial_position, np.array([0])))[np.newaxis, :]
+                    info = {"community": selected_community, "initial_position": self.initial_position.tolist()}
+                    return np.reshape(high_observation, [1,10000]), info
+                else:
+                    print("Non valid positions")
+                    selected_community = random.choices(population=[i + 1 for i in range(77)], weights=self.probability_list, k=1)[0]
+                    high_positions_list = np.argwhere(self.sub_MAP[0, ...] == selected_community)
+                    selected_high_position = np.array(random.choice(high_positions_list))
 
     def step(self, action_with_factor):
         action, factor = action_with_factor
@@ -423,12 +421,15 @@ class ChicagoMultiPolicyMap(Env):
                 terminate = False
 
             else:
-                self.temp_action_record = np.append(self.temp_action_record, self.temp_action_record[-1].reshape(1,-1).astype(int), axis=0)
+                if self.temp_action_record[-1].shape == (1,3):
+                    self.temp_action_record = np.append(self.temp_action_record, self.temp_action_record[-1], axis=0)
+                else:
+                    self.temp_action_record = np.append(self.temp_action_record, self.temp_action_record[-1].reshape(1,-1).astype(int), axis=0)
                 done = False
                 terminate = False
                 self.time_step += 1
 
-            return next_observation, r, done, terminate, info
+            return np.reshape(next_observation,[1,10000]), r, done, terminate, info
 
         elif x < 60 or x > 3360 or y < 60 or y > 4147:
             r = -1
@@ -448,11 +449,14 @@ class ChicagoMultiPolicyMap(Env):
 
 
             else:
-                self.temp_action_record = np.append(self.temp_action_record, self.temp_action_record[-1].reshape(1,-1).astype(int), axis=0)
+                if self.temp_action_record[-1].shape == (1, 3):
+                    self.temp_action_record = np.append(self.temp_action_record, self.temp_action_record[-1], axis=0)
+                else:
+                    self.temp_action_record = np.append(self.temp_action_record,self.temp_action_record[-1].reshape(1, -1).astype(int), axis=0)
                 done = False
                 terminate = False
                 self.time_step += 1
-            return next_observation, r, done, terminate, info
+            return np.reshape(next_observation,[1,10000]), r, done, terminate, info
 
         else:
             VMT = 0.28 * np.sum(self.scalar_VMT.inverse_transform(VMT_values))
@@ -812,8 +816,7 @@ class ChicagoMultiPolicyMap(Env):
                     self.time_step = 0
                     terminate = False
                     self.temp_action_record = np.array([[0, 0, 0]])
-
-            return next_observation, r, done, terminate, info
+            return np.reshape(next_observation,[1,10000]), r, done, terminate, info
 
 
     def render(self):
