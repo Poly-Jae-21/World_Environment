@@ -1,9 +1,6 @@
-import geopandas as gpd
 import rasterio
 from rasterio.features import rasterize
 import numpy as np
-from pyogrio import read_dataframe
-import gemgis as gg
 
 class Polygon_to_matrix():
     def __init__(self):

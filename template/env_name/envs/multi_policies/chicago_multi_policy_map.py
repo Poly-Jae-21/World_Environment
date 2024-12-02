@@ -3,7 +3,6 @@ import numpy as np
 from pyogrio import read_dataframe
 from typing_extensions import Optional
 import math
-import pyvista as pv
 import gemgis as gg
 import random
 import pygame
@@ -386,22 +385,19 @@ class ChicagoMultiPolicyMap(Env):
         if self.time_step == 0:
             self.factor = factor
             current_position = self.initial_position
-            converted_action = Action(self.boundary_x, self.boundary_y).local_action_converter(current_position, action) # next position
+
         else:
             current_position = self.temp_action_record[-1][0:2]
-            converted_action = Action(self.boundary_x, self.boundary_y).local_action_converter(current_position, action)
 
+        converted_action = Action(self.boundary_x, self.boundary_y).local_action_converter(current_position,action)  # next position
         action_group = converted_action[0:2].astype(int)
         x, y, capacity = converted_action[0].astype(int), converted_action[1].astype(int), converted_action[2].astype(int)
 
         next_observation, next_observation_position = generate_partial_observation(action_group, self.main_MAP)
         observation_for_subMap = generate_partial_observation_sub(action_group, self.sub_MAP)
         observation_position = np.array((50,50))
-        VMT_indices = np.argwhere(next_observation_position == -1) # charging demand from vehicle miles traveled, refers to the total number of miles traveled by vehicles in a partial observation map as daily.
-        VMT_indices = VMT_indices[np.linalg.norm(observation_position - VMT_indices, axis=1) < 50]
-        VMT_indices = np.sort(VMT_indices, axis=0)
-        VMT_values = [next_observation[x, y] for x, y in VMT_indices]
-        VMT_values = np.array([value for value in VMT_values if value != 0]).reshape(-1,1)
+
+        VMT_indices, VMT_values = self._process_indices(next_observation, next_observation_position, observation_position, -1)
 
         if len(VMT_values) ==0:
             r = -1
@@ -483,14 +479,14 @@ class ChicagoMultiPolicyMap(Env):
 
                 observation_map_for_avm = observation_for_subMap[2,...]
                 avm_indices = np.argwhere( observation_map_for_avm != 0)
-                avm = np.average([observation_map_for_avm[x, y] for x, y in avm_indices]) # average of vegetation in observation map
-                viss = observation_map_for_avm[50, 50]  # loss of vegetation cover in selected site after installation EVCSs
+                avm = np.average([observation_map_for_avm[x, y] for x, y in avm_indices])/100 # average of vegetation in observation map
+                viss = observation_map_for_avm[50, 50]/100 # loss of vegetation cover in selected site after installation EVCSs
 
                 r_apr = VMT * 1/21.79 * 23.7 - VMT * 1/4.56 * 0.72576
                 r_eser = Alpha * VMT * 1/4.56 * 0.72576
-                r_TER = r_apr + r_eser # r_TER = total emission reduction, r_apr = Air pollution reduction, r_eser = electricity sources emission reduction by replacing with solar energy
+                r_TER = (r_apr + r_eser)/(10**6) # r_TER = total emission reduction, r_apr = Air pollution reduction, r_eser = electricity sources emission reduction by replacing with solar energy
 
-                R_e = np.log(r_TER * np.exp(-avm) * np.exp(self.vegetation_percentage_max - viss))
+                R_e = r_TER * (avm - viss)
 
                 r = R_e
 
@@ -558,9 +554,9 @@ class ChicagoMultiPolicyMap(Env):
 
                 r_apr = VMT * 1 / 21.79 * 23.7 - VMT * 1 / 4.56 * 0.72576
                 r_eser = Alpha * VMT * 1 / 4.56 * 0.72576
-                r_TER = np.log(r_apr + r_eser) # r_TER = total emission reduction, r_apr = Air pollution reduction, r_eser = electricity sources emission reduction by replacing with solar energy
+                r_TER = (r_apr + r_eser)/(10**6) # r_TER = total emission reduction, r_apr = Air pollution reduction, r_eser = electricity sources emission reduction by replacing with solar energy
 
-                R_e = r_TER * math.exp(-avm) * math.exp(self.vegetation_percentage_max - viss)
+                R_e = r_TER / (avm + viss)
 
                 if capacity <= 0:
                     z = 0
@@ -852,6 +848,17 @@ class ChicagoMultiPolicyMap(Env):
                     self.window.blit(self.evcs_imgs, cell)
                 pygame.draw.rect(self.window, color, pygame.Rect(x * self.cell_size, y * self.cell_size, self.cell_size))
         pygame.display.flip()
+
+    def _process_indices(self, observation, position_map, observation_position, target_value):
+        indices = np.argwhere(position_map == target_value)
+        indices = indices[np.linalg.norm(observation_position - indices, axis=1) < 50]
+        indices = np.sort(indices, axis=0)
+        values = [observation[x, y] for x, y in indices if observation[x, y] != 0]
+        return indices, np.array(values).reshape(-1,1)
+
+    def _handle_invalid_action(self, current_position, next_observation):
+        r = -1
+
 
     def close(self):
         pygame.quit()
