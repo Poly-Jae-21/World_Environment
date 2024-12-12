@@ -97,7 +97,7 @@ class ChicagoMultiPolicyMap(Env):
 
     def __init__(self, render_mode: Optional[str] = None):
         self.action_space = spaces.Discrete(3)
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(10000,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(100,100), dtype=np.float32)
 
         self.time_step = 0
 
@@ -338,7 +338,7 @@ class ChicagoMultiPolicyMap(Env):
 
                 initial_observation, _ = generate_partial_observation(selected_initial_starting_point, self.main_MAP)
                 info = {"community": select_community, "initial_position": self.initial_position.tolist()}
-                return np.reshape(initial_observation, [1,10000]), info
+                return np.reshape(initial_observation, [100,100]), info ### [1, 10000]
             else:
                 print("No positions with the value 3 found")
                 info = {"error": f"No valid positions in community {select_community}"}
@@ -355,7 +355,7 @@ class ChicagoMultiPolicyMap(Env):
                     self.initial_position = selected_medium_position
                     self.temp_action_record = np.hstack((self.initial_position, np.array([12000])))[np.newaxis, :]
                     info = {"community": select_community, "initial_position": self.initial_position.tolist()}
-                    return np.reshape(medium_observation, [1,10000]), info
+                    return np.reshape(medium_observation, [100,100]), info
                 else:
                     print("Non valid positions")
                     select_community = random.randint(1, 77)
@@ -375,7 +375,7 @@ class ChicagoMultiPolicyMap(Env):
                     self.initial_position = selected_high_position
                     self.temp_action_record = np.hstack((self.initial_position, np.array([12000])))[np.newaxis, :]
                     info = {"community": selected_community, "initial_position": self.initial_position.tolist()}
-                    return np.reshape(high_observation, [1,10000]), info
+                    return np.reshape(high_observation, [100,100]), info
                 else:
                     print("Non valid positions")
                     selected_community = random.choices(population=[i + 1 for i in range(77)], weights=self.probability_list, k=1)[0]
@@ -412,7 +412,7 @@ class ChicagoMultiPolicyMap(Env):
         r, info = self._calculate_reward(factor, VMT, PE, Alpha, capacity, next_observation_position, observation_for_subMap)
         done, terminate = self._update_environment(factor, action_group, VMT_indices, PE_indices, capacity, r, x, y)
 
-        return np.reshape(next_observation, [1,10000]), r, done, terminate, info
+        return np.reshape(next_observation, [100,100]), r, done, terminate, info
 
 
     def render(self):
@@ -462,7 +462,7 @@ class ChicagoMultiPolicyMap(Env):
         done = self.time_step == self.max_steps
         terminate = (self.episode +1 == 5000) if done else False
         self._reset_or_continue_episode(done)
-        return np.reshape(next_observation,[1,10000]), r, done, terminate, {}
+        return np.reshape(next_observation,[100,100]), r, done, terminate, {}
 
     def _reset_or_continue_episode(self, done):
         if done:
@@ -485,27 +485,27 @@ class ChicagoMultiPolicyMap(Env):
 
     def _calculate_environment_reward(self, VMT, Alpha, observation_map):
         avm = np.mean(observation_map[2][observation_map[2] != 0]) / 100
-        r_avm = np.exp(-(self.vegetation_percentage_max-avm))
+        r_avm = np.exp(-avm)
         viss = observation_map[2, 50, 50] / 100
-        r_viss = 1-np.exp(-(self.vegetation_percentage_max-viss))
+        r_viss = np.exp(-viss)
 
         r_apr = VMT * 23.7 / 21.79  - VMT * 0.72576 / 4.56
         r_eser = Alpha * VMT * 0.72576 / 4.56
         r_TER = (r_apr + r_eser) * 0.0005
         r_TER = 1 - np.exp(-r_TER)
 
-        R_e = (r_avm + r_viss + r_TER) / 3
+        R_e = (r_avm + r_viss + r_TER)/3
 
-        info = {'VMT': VMT, 'Alpha': Alpha, 'r_apr': r_apr, 'r_eser': r_eser, 'r_TER': r_TER}
+        info = {}
 
         return R_e, info
 
     def _calculate_economic_reward(self, VMT, Alpha, capacity):
         z = round(capacity / 6000) if capacity > 0 else 0
-        F_z = z * 800 * 20600
-        P_G = (Alpha * 0.00526 + (1 - Alpha) * 0.05) * VMT
-        P_z = (F_z / VMT) - P_G
-        R_ec = np.exp(1 / P_z)
+        F_z = z * 800 * 20600 * 0.2
+        P_G = (Alpha * 0.00526 + (1 - Alpha) * 0.05) * VMT * 365
+        P_z = F_z / P_G
+        R_ec = 8 / P_z
         info = {}
         return R_ec, info
 
@@ -519,20 +519,27 @@ class ChicagoMultiPolicyMap(Env):
         return R_u, info
 
     def _calculate_composite_reward(self, VMT, Alpha, capacity, observation_map, sub_map):
-        R_e, en_info = self._calculate_environment_reward(VMT, Alpha, sub_map)
+        R_e, _ = self._calculate_environment_reward(VMT, Alpha, sub_map)
         R_ec, _ = self._calculate_economic_reward(VMT, Alpha, capacity)
         R_u, _ = self._calculate_urbanity_reward(VMT, Alpha, capacity, observation_map, sub_map)
-        R = (R_e + R_ec + R_u) / 3
-        info = {'environment reward': R_e, 'each environment reward': en_info, 'economic reward': R_ec, 'urbanity reward': R_u, 'overall reward': R}
+        R = (R_e + R_ec + R_u)/3
+        info = {'environment reward': R_e, 'economic reward': R_ec, 'urbanity reward': R_u, 'overall reward': R}
         return R, info
 
     def _update_environment(self, factor, action_group, VMT_indices, PE_indices, capacity, reward, x, y):
-        if reward >= 3 or self.time_step == self.max_steps:
-            self._apply_map_updates(factor, action_group, VMT_indices, PE_indices, capacity, x, y)
-            done = True
-            terminate = self.episode + 1 == 5000
-            self.temp_action_record = np.hstack(([self.initial_position, np.array([12000])]))[np.newaxis, :]
-            self.time_step = 0
+        if reward >= 1 or self.time_step == self.max_steps:
+            if self.time_step < 2:
+                done = False
+                terminate = False
+                converted_action = np.array([x, y, capacity]).reshape(1, -1)
+                self.temp_action_record = np.append(self.temp_action_record, converted_action, axis=0)
+                self.time_step += 1
+            else:
+                self._apply_map_updates(factor, action_group, VMT_indices, PE_indices, capacity, x, y)
+                done = True
+                terminate = self.episode + 1 == 5000
+                self.temp_action_record = np.hstack(([self.initial_position, np.array([12000])]))[np.newaxis, :]
+                self.time_step = 0
         else:
             done = False
             terminate = False
@@ -543,50 +550,69 @@ class ChicagoMultiPolicyMap(Env):
 
     def _apply_map_updates(self, factor, action_group, VMT_indices, PE_indices, capacity, x, y):
         if factor is None:
+            print("4-1")
             self.sub_MAP[2, x, y] = 0
             self.main_MAP[0, x, y] = capacity / 72000
             self.main_MAP[1, x, y] = -16
             self.sub_MAP[3, x, y] = capacity
             self._update_demand(action_group, VMT_indices, PE_indices, capacity)
 
+
     def _update_demand(self, action_group, VMT_indices, PE_indices, capacity):
 
+        print("4-2")
         self._update_VMT_demand(action_group, VMT_indices, capacity)
-        if PE_indices is not None:
+        print("4-3")
+        if len(PE_indices) != 0:
             self._update_PE_demand(action_group, PE_indices, capacity)
+            print("4-4")
 
     def _update_VMT_demand(self, action_group, VMT_indices, capacity):
 
         converted_VMT_indices = (action_group + (VMT_indices - np.array([50, 50]))).astype(int)
+        print(len(converted_VMT_indices))
         remaining_capacity = capacity
-        while remaining_capacity > 0:
-            for x, y in converted_VMT_indices:
-                if remaining_capacity <= 0:
-                    break
-                reduction = self.scalar_VMT.inverse_transform(self.main_MAP[0, x, y].reshape(-1, 1)) * 0.28 / 4.56
-                remaining_capacity -= reduction
-                self.main_MAP[0, x, y] *= (1-0.28)
-                if remaining_capacity <= 0:
-                    service_radius = np.linalg.norm(action_group - np.array([x, y]))
-                    self.service_radius_list.append(service_radius)
+
+        x_indices, y_indices = converted_VMT_indices.T
+        vmt_values = self.main_MAP[0, x_indices, y_indices]
+
+        reductions = self.scalar_VMT.inverse_transform(vmt_values.reshape(-1, 1)) * 0.28 / 4.56
+        reductions = reductions.flatten()
+        converted_reductions = self.scalar_VMT.fit_transform((vmt_values - reductions * 4.56).reshape(-1, 1)).flatten()
+
+        for i, (x, y, reduction, c_reduction) in enumerate(zip(x_indices, y_indices, reductions, converted_reductions)):
+            if remaining_capacity <= 0:
+                break
+
+            reduction_amount = min(reduction, remaining_capacity)
+            remaining_capacity -= reduction_amount
+            self.main_MAP[0, x, y] = c_reduction
 
     def _update_PE_demand(self, action_group, PE_indices, capacity):
 
         converted_PE_indices = (action_group + (PE_indices - np.array([50,50]))).astype(int)
         remaining_capacity = capacity
-        while remaining_capacity > 0:
-            for x, y in converted_PE_indices:
-                if remaining_capacity <= 0:
-                    break
-                reduction = self.scalar_PE.inverse_transform(self.main_MAP[0, x, y].reshape(-1, 1))
-                remaining_capacity -= reduction
+        print(len(converted_PE_indices))
 
-                if remaining_capacity <= 0:
-                    self.main_MAP[0, x, y] = self.scalar_PE.fit_transform(remaining_capacity+reduction)
-                else:
-                    self.main_MAP[0, x, y] = 0
-                    self.main_MAP[1, x, y] = 0
+        x_indices, y_indices = converted_PE_indices.T
+        pe_values = self.main_MAP[0, x_indices, y_indices]
 
+        reductions = self.scalar_PE.inverse_transform(pe_values.reshape(-1, 1)).flatten()
+
+        for i, (x, y, reduction) in enumerate(zip(x_indices, y_indices, reductions)):
+            if remaining_capacity <= 0:
+                break
+
+            reduction_amount = min(reduction, remaining_capacity)
+            remaining_capacity -= reduction_amount
+
+            if remaining_capacity <= 0:
+                updated_value = self.scalar_PE.fit_transform(np.array([reduction_amount + reduction]).reshape(-1, 1)).flatten()[0]
+                self.main_MAP[0, x, y] = updated_value
+
+            else:
+                self.main_MAP[0,x,y] = 0
+                self.main_MAP[1,x,y] = 0
 
     def close(self):
         pygame.quit()
