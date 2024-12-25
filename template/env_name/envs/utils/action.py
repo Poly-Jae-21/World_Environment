@@ -3,6 +3,9 @@ import numpy as np
 import torch.distributions as distributions
 import math
 
+def softsign(x):
+    return x / (np.abs(x) + 1)
+
 class Action(object):
     def __init__(self, boundary_x, boundary_y):
         self.max_capacity = 12 ## 12 stalls; 1 stall = 250 kWh = 6 MWh/daily; 12 stalls = 72 MWh/day
@@ -19,12 +22,12 @@ class Action(object):
         MAP next action = converted action for MAP from next action
         """
 
-        MAP_next_action_x = round(np.tanh(next_action[0])*50)
-        MAP_next_action_y = round(np.tanh(next_action[1])*50)
+        MAP_next_action_x = round(softsign(next_action[0])*50)
+        MAP_next_action_y = round(softsign(next_action[1])*50)
         MAP_next_action = np.array([-MAP_next_action_y, MAP_next_action_x])
         MAP_next_position = (current_position + MAP_next_action).astype('int32')
 
-        original_next_capacity = 6000 * (np.tanh(next_action[2]) * (self.max_capacity-self.min_capacity)/2 + (self.max_capacity+self.min_capacity)/2) ## next_action[0][2] = 0 ~ 1 ex) if 0.1 -> stalls =3
+        original_next_capacity = 6000 * (softsign(next_action[2]) * (self.max_capacity-self.min_capacity)/2 + (self.max_capacity+self.min_capacity)/2) ## next_action[0][2] = 0 ~ 1 ex) if 0.1 -> stalls =3
         MAP_next_action = np.concatenate((MAP_next_position, np.array([original_next_capacity]))) # MAP_next_action -> current_action in next step
 
         return MAP_next_action

@@ -97,7 +97,7 @@ class ChicagoMultiPolicyMap(Env):
 
     def __init__(self, render_mode: Optional[str] = None):
         self.action_space = spaces.Discrete(3)
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(100,100), dtype=np.float32)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(10000,), dtype=np.float32)
 
         self.time_step = 0
 
@@ -338,7 +338,7 @@ class ChicagoMultiPolicyMap(Env):
 
                 initial_observation, _ = generate_partial_observation(selected_initial_starting_point, self.main_MAP)
                 info = {"community": select_community, "initial_position": self.initial_position.tolist()}
-                return np.reshape(initial_observation, [100,100]), info ### [1, 10000]
+                return np.reshape(initial_observation, [1,10000]), info ### [1, 10000]
             else:
                 print("No positions with the value 3 found")
                 info = {"error": f"No valid positions in community {select_community}"}
@@ -355,7 +355,7 @@ class ChicagoMultiPolicyMap(Env):
                     self.initial_position = selected_medium_position
                     self.temp_action_record = np.hstack((self.initial_position, np.array([12000])))[np.newaxis, :]
                     info = {"community": select_community, "initial_position": self.initial_position.tolist()}
-                    return np.reshape(medium_observation, [100,100]), info
+                    return np.reshape(medium_observation, [1,10000]), info
                 else:
                     print("Non valid positions")
                     select_community = random.randint(1, 77)
@@ -375,7 +375,7 @@ class ChicagoMultiPolicyMap(Env):
                     self.initial_position = selected_high_position
                     self.temp_action_record = np.hstack((self.initial_position, np.array([12000])))[np.newaxis, :]
                     info = {"community": selected_community, "initial_position": self.initial_position.tolist()}
-                    return np.reshape(high_observation, [100,100]), info
+                    return np.reshape(high_observation, [1,10000]), info
                 else:
                     print("Non valid positions")
                     selected_community = random.choices(population=[i + 1 for i in range(77)], weights=self.probability_list, k=1)[0]
@@ -400,8 +400,9 @@ class ChicagoMultiPolicyMap(Env):
         observation_position = np.array((50,50))
 
         VMT_indices, VMT_values = self._process_indices(next_observation, next_observation_position, observation_position, -1)
+        print(len(VMT_indices))
 
-        if len(VMT_values) == 0 or self.sub_MAP[0, x, y] == 0:
+        if len(VMT_indices) == 0:
             return self._handle_invalid_action(current_position)
 
         VMT = 0.28 * np.sum(self.scalar_VMT.inverse_transform(VMT_values))
@@ -412,7 +413,7 @@ class ChicagoMultiPolicyMap(Env):
         r, info = self._calculate_reward(factor, VMT, PE, Alpha, capacity, next_observation_position, observation_for_subMap)
         done, terminate = self._update_environment(factor, action_group, VMT_indices, PE_indices, capacity, r, x, y)
 
-        return np.reshape(next_observation, [100,100]), r, done, terminate, info
+        return np.reshape(next_observation, [1,10000]), r, done, terminate, info
 
 
     def render(self):
@@ -450,11 +451,33 @@ class ChicagoMultiPolicyMap(Env):
         pygame.display.flip()
 
     def _process_indices(self, observation, position_map, observation_position, target_value):
-        indices = np.argwhere(position_map == target_value)
-        indices = indices[np.linalg.norm(observation_position - indices, axis=1) < 50]
-        indices = np.sort(indices, axis=0)
-        values = [observation[x, y] for x, y in indices if observation[x, y] != 0]
-        return indices, np.array(values).reshape(-1,1)
+
+        if target_value == -1:
+            target_values = [-1, -3, -5, -9, -17]
+
+        else:
+            target_values = [-8, -9, -10, -12, -24]
+
+        mask_all = np.isin(position_map, target_values)
+        indices_all = np.argwhere(mask_all)
+
+        filtered_indices = indices_all[np.linalg.norm(observation_position - indices_all, axis=1) < 50]
+
+        total_values = []
+        for x, y in filtered_indices:
+            pos_ = position_map[x, y]
+            obs_ = observation[x, y]
+
+            if pos_ in [-1, -8]:
+                adjusted_value = obs_
+            else:
+                adjusted_value = obs_ - ((pos_ - target_value) / -16)
+
+            total_values.append(adjusted_value)
+
+        total_indices = np.unique(filtered_indices, axis=0)
+
+        return total_indices, np.array(total_values).reshape(-1,1)
 
     def _handle_invalid_action(self, current_position):
         r = -1
@@ -462,7 +485,7 @@ class ChicagoMultiPolicyMap(Env):
         done = self.time_step == self.max_steps
         terminate = (self.episode +1 == 5000) if done else False
         self._reset_or_continue_episode(done)
-        return np.reshape(next_observation,[100,100]), r, done, terminate, {}
+        return np.reshape(next_observation,[1,10000]), r, done, terminate, {}
 
     def _reset_or_continue_episode(self, done):
         if done:
@@ -495,6 +518,11 @@ class ChicagoMultiPolicyMap(Env):
         r_TER = 1 - np.exp(-r_TER)
 
         R_e = (r_avm + r_viss + r_TER)/3
+        if R_e >= 0.6:
+            R_e = 10
+
+        if self.time_step == self.max_steps and R_e < 0.6:
+            R_e = -10
 
         info = {}
 
@@ -505,7 +533,16 @@ class ChicagoMultiPolicyMap(Env):
         F_z = z * 800 * 20600 * 0.2
         P_G = (Alpha * 0.00526 + (1 - Alpha) * 0.05) * VMT * 365
         P_z = F_z / P_G
-        R_ec = 8 / P_z
+        R_ec = 12 / P_z
+
+        if R_ec >= 1:
+            R_ec = 10
+        else:
+            R_ec = -1
+
+        if self.time_step == self.max_steps and R_ec < 1:
+            R_ec = -1
+
         info = {}
         return R_ec, info
 
@@ -515,6 +552,12 @@ class ChicagoMultiPolicyMap(Env):
         r_lu = 1 if sub_map[1, 50, 50] == 1 else 0
         r_sc = 1 if capacity >= (VMT / 4.56) else 0
         R_u = (r_drn + r_dg + r_lu + r_sc) / 4
+        if R_u == 1:
+            R_u = 10
+
+        if self.time_step == self.max_steps and R_u < 1:
+            R_u = -10
+
         info = {}
         return R_u, info
 
@@ -522,13 +565,13 @@ class ChicagoMultiPolicyMap(Env):
         R_e, _ = self._calculate_environment_reward(VMT, Alpha, sub_map)
         R_ec, _ = self._calculate_economic_reward(VMT, Alpha, capacity)
         R_u, _ = self._calculate_urbanity_reward(VMT, Alpha, capacity, observation_map, sub_map)
-        R = (R_e + R_ec + R_u)/3
+        R = R_e + R_ec + R_u
         info = {'environment reward': R_e, 'economic reward': R_ec, 'urbanity reward': R_u, 'overall reward': R}
         return R, info
 
     def _update_environment(self, factor, action_group, VMT_indices, PE_indices, capacity, reward, x, y):
-        if reward >= 1 or self.time_step == self.max_steps:
-            if self.time_step < 2:
+        if reward >= 30 or self.time_step == self.max_steps:
+            if self.time_step < 20:
                 done = False
                 terminate = False
                 converted_action = np.array([x, y, capacity]).reshape(1, -1)
@@ -575,6 +618,10 @@ class ChicagoMultiPolicyMap(Env):
 
         x_indices, y_indices = converted_VMT_indices.T
         vmt_values = self.main_MAP[0, x_indices, y_indices]
+        vmt_check = self.main_MAP[1, x_indices, y_indices]
+
+        condition_mask = np.isin(vmt_check, [-3, -5, -9, -17])
+        vmt_values[condition_mask] = vmt_values[condition_mask] - (vmt_check[condition_mask]-(-1)) / -16
 
         reductions = self.scalar_VMT.inverse_transform(vmt_values.reshape(-1, 1)) * 0.28 / 4.56
         reductions = reductions.flatten()
@@ -592,10 +639,13 @@ class ChicagoMultiPolicyMap(Env):
 
         converted_PE_indices = (action_group + (PE_indices - np.array([50,50]))).astype(int)
         remaining_capacity = capacity
-        print(len(converted_PE_indices))
 
         x_indices, y_indices = converted_PE_indices.T
         pe_values = self.main_MAP[0, x_indices, y_indices]
+        pe_check = self.main_MAP[1, x_indices, y_indices]
+
+        condition_mask = np.isin(pe_check, [-9,-10,-12,-24])
+        pe_values[condition_mask] = pe_values[condition_mask] - (pe_check[condition_mask]-(-8)) / -16
 
         reductions = self.scalar_PE.inverse_transform(pe_values.reshape(-1, 1)).flatten()
 
