@@ -22,8 +22,8 @@ class Action(object):
         MAP next action = converted action for MAP from next action
         """
 
-        MAP_next_action_x = round(softsign(next_action[0])*50)
-        MAP_next_action_y = round(softsign(next_action[1])*50)
+        MAP_next_action_x = np.round(softsign(next_action[0])*50)
+        MAP_next_action_y = np.round(softsign(next_action[1])*50)
         MAP_next_action = np.array([-MAP_next_action_y, MAP_next_action_x])
         MAP_next_position = (current_position + MAP_next_action).astype('int32')
 

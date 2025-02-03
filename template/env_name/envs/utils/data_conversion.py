@@ -25,7 +25,7 @@ class Polygon_to_matrix():
                         1410, 1420, 1430, 1431, 1432, 1433, 1450, 1540, 3000, 3100, 3200, 3300, 4000, 4100, 4110, 4120,
                         4130, 4140]
 
-        gdf['LANDUSE'] = gdf['LANDUSE'].apply(lambda x: 1 if x in Ok_land_list else 2)
+        gdf['LANDUSE'] = gdf['LANDUSE'].apply(lambda x: 1 if x in Ok_land_list else 0)
 
 
         bounds = gdf.total_bounds  # get bounds of the shapefile
@@ -116,7 +116,7 @@ class Polygon_to_matrix():
             gdf['Code'] = gdf['Code'].astype(int)
         except ValueError:
             raise ValueError("The 'Code' column contains non-numeric values.")
-        gdf['Code'] = -4
+        gdf['Code'] = 1
         # Step 2: Define the geometry and transform
         bounds = gdf.total_bounds  # get bounds of the shapefile
         resolution = 10  # define your desired resolution
@@ -148,7 +148,7 @@ class Polygon_to_matrix():
             gdf['objectid'] = gdf['objectid'].astype(int)
         except ValueError:
             raise ValueError("The 'objectid' column contains non-numeric values.")
-        gdf['objectid'] = -2
+        gdf['objectid'] = 1
         # Step 2: Define the geometry and transform
         bounds = gdf.total_bounds  # get bounds of the shapefile
         resolution = 10  # define your desired resolution
@@ -190,11 +190,11 @@ class Density:
 
         return radius
 
-    def KernelDensity(self, radius, sub_map):
+    def KernelDensity(self, radius, map):
         densitys = []
         gaussian_kernels = []
         for i in range(len(self.c)):
-            action_records = np.argwhere(sub_map[3] != 0)
+            action_records = np.argwhere(map[3] != 0)
             for j in range(len(action_records)):
                 dist_i_j = np.linalg.norm(self.c[i] - action_records[j])
                 if dist_i_j <= radius:
