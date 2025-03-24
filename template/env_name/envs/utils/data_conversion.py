@@ -190,23 +190,22 @@ class Density:
 
         return radius
 
-    def KernelDensity(self, radius, map):
-        densitys = []
-        gaussian_kernels = []
-        for i in range(len(self.c)):
-            action_records = np.argwhere(map[3] != 0)
-            for j in range(len(action_records)):
-                dist_i_j = np.linalg.norm(self.c[i] - action_records[j])
-                if dist_i_j <= radius:
-                    ii = 1
-                    gaussian_kernel = (1 / np.roots((2 * np.pi))) * (-1)**(-ii)*(1-(dist_i_j / radius)**2)**2
-                    gaussian_kernels.append(gaussian_kernel)
-                else:
-                    gaussian_kernel = 0
-                    gaussian_kernels.append(gaussian_kernel)
+    def KernelDensity(self, radius, map_):
+        densities = []
 
-            density_i = (1 / radius ** 2) * np.sum(gaussian_kernels)
-            densitys.append(density_i)
+        action_records = np.argwhere(map_[3] != 0)
 
-        return densitys
+        for point in self.c:
+            distances = np.linalg.norm(action_records - point, axis=1)
+
+            within_radius = distances < radius
+
+            gaussian_kernels = (1 / np.sqrt(2 * np.pi)) * np.exp(-0.5 * (distances[within_radius] / radius)**2)
+
+            density = (1 / radius ** 2) * np.sum(gaussian_kernels)
+
+            densities.append(density)
+
+        return densities
+
 

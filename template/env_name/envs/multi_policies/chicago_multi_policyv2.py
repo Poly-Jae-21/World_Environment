@@ -70,6 +70,7 @@ class ChicagoMultiPolicyMapv2(Env):
              0, # y
              0, # boundary map
              0, # landuse map
+             0, # Alpha = Percentage of electricity by capacity
              0, # Minimum distance of power grid to target site (current position)
              0, # Minimum distance of main road to target site
              0, # Average percentage of vegetation in the observation
@@ -90,6 +91,7 @@ class ChicagoMultiPolicyMapv2(Env):
              1,
              1,
              1,
+             1,
             ]
         ).astype(np.float32)
 
@@ -99,27 +101,21 @@ class ChicagoMultiPolicyMapv2(Env):
         self.scalar_VMT_ = MinMaxScaler(feature_range=(0, 1))
         self.scalar_PE_ = MinMaxScaler(feature_range=(0, 1))
 
-        self.main_MAP = self.Mapping()
+        self.main_MAP_ = self.Mapping()
 
         self.episode = 0
+
         self.initial_position = 0
         self.position_record = []
         self.capacity_record = [0]
-
-        self.temp_action_record = np.array([[0, 0, 0]])
 
         self.probability_list = []  ## This is for the starting point distribution probability. It can be updated over episodes after 32 self.episode
         self.max_steps = 100
         self.factor = None
         self.service_radius_list = []
 
-        self.select_community = None
+        #self.select_community = random.randint(1, 77)
 
-        self.Den = 0
-        self.radius = 0
-
-        self.normalized_VMT = None
-        self.normalized_PE = None
 
         # pygame utils
         self.window = None
@@ -293,10 +289,12 @@ class ChicagoMultiPolicyMapv2(Env):
         main_MAP = np.zeros(shape=(9, self.boundary_y + 1, self.boundary_x + 1))
 
         VMT = np.array(obj5.iloc[:, -4]).reshape(-1, 1)
-        self.normalized_VMT = self.scalar_VMT_.fit_transform(VMT)
+        self.scalar_VMT_.fit(VMT)
+        self.normalized_VMT = self.scalar_VMT_.transform(VMT)
 
         PE = np.array(obj6.iloc[:, -4]).reshape(-1, 1)
-        self.normalized_PE = self.scalar_PE_.fit_transform(PE)
+        self.scalar_PE_.fit(PE)
+        self.normalized_PE = self.scalar_PE_.transform(PE)
 
         for ii in range(len(obj5)):
             x_val, y_val = int(obj5.iloc[ii, -2]), int(obj5.iloc[ii, -1])
@@ -361,12 +359,12 @@ class ChicagoMultiPolicyMapv2(Env):
         self.time_step = 0
         self.initial_position = np.array([0, 0])
         self.episode = options + 1
-        self.main_MAP_ = self.main_MAP.copy()
+        #self.main_MAP_ = self.main_MAP.copy()
 
         if not hasattr(self, 'action_converter'):
             self.action_converter = Action(self.boundary_x, self.boundary_y)
         ## Simplify the training model
-        if self.episode <= 30:
+        if self.episode <= 10000:
             self.select_community = random.randint(1, 77)
             initial_position_list = np.argwhere(self.main_MAP_[0] == self.select_community)
             if initial_position_list.size > 0:
@@ -375,9 +373,17 @@ class ChicagoMultiPolicyMapv2(Env):
                 self.initial_position = selected_initial_starting_point
                 self.temp_action_record = np.hstack(([self.initial_position, np.array([12000])]))[np.newaxis, :]
 
-                start_action = (self.temp_action_record.squeeze(), "None", False)
+                start_action = (self.temp_action_record.squeeze(), "reset", False, True)
 
                 info = {"community": self.select_community, "initial_position": self.initial_position.tolist()}
+
+                if self.episode == 1:
+                    self.action_record_environment = np.hstack(([self.initial_position, np.array([12000])])).reshape(1,
+                                                                                                                     -1)
+                    self.action_record_economy = np.hstack(([self.initial_position, np.array([12000])])).reshape(1, -1)
+                    self.action_record_urbanity = np.hstack(([self.initial_position, np.array([12000])])).reshape(1, -1)
+                    self.average_action_record = np.hstack(([self.initial_position, np.array([12000]),np.array([0]),np.array([0]),np.array([0]),np.array([0]),np.array([0])])).reshape(1, -1)
+                    self.meta_action_record = np.hstack(([self.initial_position, np.array([12000]),np.array([0]),np.array([0]),np.array([0]),np.array([0]),np.array([0])])).reshape(1, -1)
 
                 return self.step(start_action)[0], info
             else:
@@ -400,7 +406,7 @@ class ChicagoMultiPolicyMapv2(Env):
                     self.temp_action_record = np.hstack((self.initial_position, np.array([12000])))[np.newaxis, :]
                     info = {"community": selected_community, "initial_position": self.initial_position.tolist()}
 
-                    start_action = (self.temp_action_record.squeeze(), "None", False)
+                    start_action = (self.temp_action_record.squeeze(), "reset", False, True)
 
                     return self.step(start_action)[0], info
                 else:
@@ -410,9 +416,14 @@ class ChicagoMultiPolicyMapv2(Env):
                     selected_high_position = np.array(random.choice(high_positions_list))
 
     def step(self, action_with_factor):
+        """
 
+        :param action_with_factor: action ((x,y),capacity,update[True, False], reset[True, False])
+        Update boolean is to identify whether environment has to update in current step.
+        Reset boolean refers that current step is from the reset function.
+        :return:
+        """
         current_position = self.temp_action_record[-1][0:2]
-        print(current_position)
 
         action = action_with_factor[0]
 
@@ -420,7 +431,15 @@ class ChicagoMultiPolicyMapv2(Env):
 
         env_update = action_with_factor[2]
 
-        converted_action = self.action_converter.local_action_converter(current_position,action) if self.time_step != 0 else action  # next position
+        reset_step = action_with_factor[3]
+
+        converted_action = []
+        ### self.time_step != 0 and reset_step == False -> action is from output in the training model, and thus it should be needed to convert into the extent. On the other hand, action does not need to convert into real extent.
+        if not reset_step:
+            converted_action = self.action_converter.local_action_converter(current_position,action) # next position
+        else:
+            converted_action = action
+
         action_group = converted_action[0:2].astype(int)
         x, y, capacity = converted_action[0].astype(int), converted_action[1].astype(int), converted_action[2].astype(
             int)
@@ -429,53 +448,61 @@ class ChicagoMultiPolicyMapv2(Env):
 
         observation_position = np.array((50, 50))
 
-        VMT_indices, VMT_values, VMT = self._process_indices(next_observation, observation_position, -1)
+        VMT_indices, VMT_values, raw_VMT_values, VMT, raw_VMT = self._process_indices(next_observation, observation_position, -1)
 
-        PE_indices, PE_values, PE = self._process_indices(next_observation, observation_position, -8)
+        PE_indices, PE_values, raw_PE_values, PE, raw_PE = self._process_indices(next_observation, observation_position, -8)
 
         # potential EVCS
-        indices_all = np.argwhere(self.main_MAP_[3,...] != 0)
+        indices_all = np.argwhere(next_observation[3,...] != 0)
         av_of_ops = np.mean(np.linalg.norm(observation_position - indices_all, axis=1)) / 50 if len(indices_all) > 0 else 0
 
         # power grid
         indices_all = np.argwhere(self.main_MAP_[4] != 0)
-        mg = np.min(np.linalg.norm(observation_position - indices_all, axis=1)) / (2*math.sqrt(50))
+        mg = np.min(np.linalg.norm(observation_position - indices_all, axis=1)) / (2*math.sqrt(50)) if len(indices_all) > 0 else 0
 
         # main road
         indices_all = np.argwhere(self.main_MAP_[7] != 0)
-        mr = np.min(np.linalg.norm(observation_position - indices_all, axis=1)) / (2*math.sqrt(50))
+        mr = np.min(np.linalg.norm(observation_position - indices_all, axis=1)) / (2*math.sqrt(50)) if len(indices_all) > 0 else 0
 
-        converted_PE = np.sum(self.scalar_PE_.inverse_transform(PE_values)) if len(PE_values) > 0 else 0
-        Alpha = 1 if converted_PE >= capacity else converted_PE / capacity
+        Alpha = 1 if raw_PE >= capacity else raw_PE / capacity
 
-        avm = np.mean(next_observation[2][next_observation[2] != 0]) / 100
-        if avm == np.nan:
-            avm = 0
+        avm = np.mean(next_observation[2][next_observation[2] != 0]) / 100 if len(next_observation[2][next_observation[2] != 0]) != 0 else 0
         VMT = 0 if len(VMT_indices) == 0 else VMT
+        PE_ = 0 if len(PE_indices) == 0 else PE/len(PE_indices)
+        if 0<= x < self.main_MAP_.shape[1] and 0<= y < self.main_MAP_.shape[2]:
+            next_state = [
+                x / self.boundary_x,
+                y / self.boundary_y,
+                self.main_MAP_[0, x, y] / 77,
+                self.main_MAP_[1, x, y],
+                Alpha,
+                mg,
+                mr,
+                avm,
+                VMT,
+                PE_,
+                av_of_ops
+            ]
 
-        if mg == np.nan:
-            mg = 0
-        if mr == np.nan:
-            mr = 0
+        else:
+            next_state = [
+                x / self.boundary_x,
+                y / self.boundary_y,
+                0,
+                0,
+                Alpha,
+                mg,
+                mr,
+                avm,
+                VMT,
+                PE_,
+                av_of_ops
+            ]
+        if len(VMT_indices) == 0 or int(self.main_MAP_[0,x,y]) is not self.select_community:
+            return self._handle_invalid_action(next_observation, next_state, env_update, action_group, capacity, x, y, VMT_indices, PE_indices, raw_VMT)
 
-        next_state = [
-            x / self.boundary_x,
-            y / self.boundary_y,
-            self.main_MAP_[0, x, y]/77,
-            self.main_MAP_[1, x, y],
-            mg,
-            mr,
-            avm,
-            VMT,
-            PE,
-            av_of_ops
-        ]
-        print(self.time_step, env_update, self.factor, action, converted_action, next_state)
-        if len(VMT_indices) == 0 or self.main_MAP_[0,x,y] is not self.select_community:
-            return self._handle_invalid_action(next_state)
-
-        r, info = self._calculate_reward(self.factor, VMT, PE, Alpha, capacity, next_observation)
-        done, terminate = self._update_environment(self.factor, action_group, VMT_indices, PE_indices, capacity, r, x, y, env_update)
+        r, info = self._calculate_reward(self.factor, raw_VMT, raw_PE, Alpha, capacity, next_observation)
+        done, terminate = self._update_environment(self.factor, action_group, VMT_indices, PE_indices, capacity, r, x, y, env_update, info)
 
         return np.array(next_state, dtype=np.float32), r, done, terminate, info
 
@@ -497,18 +524,18 @@ class ChicagoMultiPolicyMapv2(Env):
             file_name = path.join(path.dirname(__file__), "img/EVCS.png")
             self.evcs_imgs = pygame.transform.scale(pygame.image.load(file_name), self.cell_size)
 
-        for y in range(self.main_MAP.shape[1]):
-            for x in range(self.main_MAP.shape[2]):
+        for y in range(self.main_MAP_.shape[1]):
+            for x in range(self.main_MAP_.shape[2]):
                 cell = (x * self.cell_size, y * self.cell_size)
                 color = (255, 255, 255)
-                if self.main_MAP[1, y, x] == -1:
+                if self.main_MAP_[1, y, x] == -1:
                     color = (255, 0, 0)  # Red
-                elif self.main_MAP[1, y, x] == -2:
+                elif self.main_MAP_[1, y, x] == -2:
                     color = (0, 0, 255)  # Blue
-                elif self.main_MAP[1, y, x] == - 8:
-                    PE_value = int((self.main_MAP[0, y, x] / 100) * 255)
+                elif self.main_MAP_[1, y, x] == - 8:
+                    PE_value = int((self.main_MAP_[0, y, x] / 100) * 255)
                     color = (PE_value, 0, 0)
-                elif self.main_MAP[1, y, x] == -16:
+                elif self.main_MAP_[1, y, x] == -16:
                     self.window.blit(self.evcs_imgs, cell)
                 pygame.draw.rect(self.window, color,
                                  pygame.Rect(x * self.cell_size, y * self.cell_size, self.cell_size))
@@ -521,61 +548,111 @@ class ChicagoMultiPolicyMapv2(Env):
 
         if target_value == -1:
             total_values = []
+            Inverse_total_values = []
             for x, y in filtered_indices:
                 obs_ = observation[5, x, y]
                 total_values.append(obs_)
+                obs_ = self.scalar_VMT_.inverse_transform(np.array(obs_).reshape(-1,1)).item()
+                Inverse_total_values.append(obs_)
 
             total_indices = np.unique(filtered_indices, axis=0)
 
+            Inverse_value = 0.28 * np.sum(Inverse_total_values)
             value = 0.28 * np.sum(total_values)
 
         else:
             total_values = []
+            Inverse_total_values = []
             for x, y in filtered_indices:
                 obs_ = observation[6, x, y]
-
                 total_values.append(obs_)
+                obs_ = self.scalar_PE_.inverse_transform(np.array(obs_).reshape(-1,1)).item()
+                Inverse_total_values.append(obs_)
 
             total_indices = np.unique(filtered_indices, axis=0)
 
             value = np.sum(total_values)
+            Inverse_value = np.sum(Inverse_total_values)
 
-        return total_indices, np.array(total_values).reshape(-1, 1), value
+        return total_indices, np.array(total_values).reshape(-1, 1), np.array(Inverse_total_values).reshape(-1,1), value, Inverse_value
 
-    def _handle_invalid_action(self, next_state):
+    def _handle_invalid_action(self, next_observation, next_state, env_update, action_group, capacity, x, y, VMT_indices, PE_indices, raw_VMT):
+        if self.time_step == self.max_steps:
+            done = True
+        else:
+            done = False
+        terminate = (self.episode + 1 == 20000) if done else False
         r = -1
-        done = self.time_step == self.max_steps
-        terminate = (self.episode + 1 == 5000) if done else False
-        self._reset_or_continue_episode(done)
-        return np.array(next_state, dtype=np.float32), r, done, terminate, {}
 
-    def _reset_or_continue_episode(self, done):
-        if done:
-            self.temp_action_record = np.hstack(([self.initial_position, np.array([0])]))[np.newaxis, :]
+        if done and env_update:
+            converted_action = np.array([x, y, capacity]).reshape(1, -1)
+            if self.factor == 'environment':
+                self.action_record_environment = np.append(self.action_record_environment, converted_action, axis=0)
+                self.reward_environment = np.array([-1])
+            elif self.factor == 'economic':
+                self.action_record_economy = np.append(self.action_record_economy, converted_action, axis=0)
+                self.reward_economy = np.array([-1])
+            elif self.factor == 'urbanity':
+                self.action_record_urbanity = np.append(self.action_record_urbanity, converted_action, axis=0)
+                self.reward_urbanity = np.array([-1])
+            elif self.factor is None:
+                self.reward_average = (self.reward_environment + self.reward_economy + self.reward_urbanity) / 3
+                self.reward_meta = np.array([-1])
+                meta_converted_action = np.array([x, y, capacity,-1,-1,-1,-1,-1]).reshape(1, -1)
+
+                average_action_record = np.array([np.mean(np.array(
+                    [self.action_record_environment[-1], self.action_record_economy[-1],
+                     self.action_record_urbanity[-1]]), axis=0)]).astype(int)
+                average_reward = np.array([
+                    self.reward_environment.item(),
+                    self.reward_economy.item(),
+                    self.reward_urbanity.item(),
+                    self.reward_average.item(),
+                    self.reward_meta.item()
+                ]).reshape(1, -1)
+                average_value = np.hstack((average_action_record, average_reward))
+
+                self.average_action_record = np.append(self.average_action_record, average_value, axis=0)
+                self.meta_action_record = np.append(self.meta_action_record, meta_converted_action, axis=0)
+
+            #a = [i for i in range(1,78)]
+
+            if int(next_observation[0,50,50]) == int(self.select_community):
+                self._apply_map_updates(self.factor, action_group, VMT_indices, PE_indices, capacity, x, y)
+
+            self.temp_action_record = np.hstack(([self.initial_position, np.array([12000])]))[np.newaxis, :]
             self.time_step = 0
-        else:
+
+            np.savetxt("out/result/reward/test/" + "average_action_record.csv", self.average_action_record, delimiter=",")
+            np.savetxt("out/result/reward/test/" + "meta_action_record.csv", self.meta_action_record, delimiter=",")
+        elif done is False:
             last_action = self.temp_action_record[-1]
-            self.temp_action_record = np.append(self.temp_action_record, last_action.reshape(1, -1).astype(int), axis=0)
+            self.temp_action_record = np.append(self.temp_action_record, last_action.reshape(1, -1).astype(int),axis=0)
             self.time_step += 1
-
-    def _calculate_reward(self, factor, VMT, PE, Alpha, capacity, observation_map):
-        if factor == 'environment':
-            return self._calculate_environment_reward(VMT, Alpha, observation_map)
-        elif factor == 'economic':
-            return self._calculate_economic_reward(VMT, Alpha, capacity)
-        elif factor == 'urbanity':
-            return self._calculate_urbanity_reward(VMT, Alpha, capacity, observation_map)
         else:
-            return self._calculate_composite_reward(VMT, Alpha, capacity, observation_map)
+            self.temp_action_record = np.hstack(([self.initial_position, np.array([12000])]))[np.newaxis, :]
+            self.time_step = 0
+        info = {'VMT': raw_VMT}
+        return np.array(next_state, dtype=np.float32), r, done, terminate, info
 
-    def _calculate_environment_reward(self, VMT, Alpha, observation_map):
+    def _calculate_reward(self, factor, raw_VMT, PE, Alpha, capacity, observation_map):
+        if factor == 'environment':
+            return self._calculate_environment_reward(raw_VMT, Alpha, observation_map)
+        elif factor == 'economic':
+            return self._calculate_economic_reward(raw_VMT, Alpha, capacity)
+        elif factor == 'urbanity':
+            return self._calculate_urbanity_reward(raw_VMT, Alpha, capacity, observation_map)
+        else:
+            return self._calculate_composite_reward(raw_VMT, Alpha, capacity, observation_map)
+
+    def _calculate_environment_reward(self, raw_VMT, Alpha, observation_map):
         avm = np.mean(observation_map[2][observation_map[2] != 0]) / 100
         r_avm = np.exp(-avm)
         viss = observation_map[2, 50, 50] / 100
         r_viss = np.exp(-viss)
 
-        r_apr = VMT * 23.7 / 21.79 - VMT * 0.72576 / 4.56
-        r_eser = Alpha * VMT * 0.72576 / 4.56
+        r_apr = raw_VMT * 23.7 / 21.79 - raw_VMT * 0.72576 / 4.56
+        r_eser = Alpha * raw_VMT * 0.72576 / 4.56
         r_TER = (r_apr + r_eser) * 0.0005
         r_TER = 1 - np.exp(-r_TER)
 
@@ -588,35 +665,33 @@ class ChicagoMultiPolicyMapv2(Env):
         if self.time_step == self.max_steps and R_e < 0.6:
             R_e = -1
 
-        info = {}
+        info = {'reward_environment': R_e}
 
         return R_e, info
 
-    def _calculate_economic_reward(self, VMT, Alpha, capacity):
+    def _calculate_economic_reward(self, raw_VMT, Alpha, capacity):
         z = round(capacity / 6000) if capacity > 0 else 0
-        F_z = z * 800 * 20600 * 0.2
-        P_G = (Alpha * 0.00526 + (1 - Alpha) * 0.05) * VMT * 365
-        P_z = F_z / P_G
-        # z / P_G
+        F_z = z * (20600 * 0.2 + 800)
+        P_G = (Alpha * (0.28 - 0.06) + (1 - Alpha) * (0.28 - 0.0405)) * raw_VMT * 365
+        ### commercial electricity rate (Chicago): 0.0405$/kwh, Supercharger cost (0.2~0.6): 0.28$/kwh, PV electricity rate(SolarReviews): 0.06$/kwh
+        R_ec = (P_G * 12) - F_z
 
-        R_ec = 100 / P_z
-
-        if R_ec >= 1:
+        if R_ec >= 0:
             R_ec = 10
         else:
             R_ec = -1
 
-        if self.time_step == self.max_steps and R_ec < 1:
-            R_ec = -1
+        if self.time_step == self.max_steps and R_ec < 0:
+            R_ec = -10
 
-        info = {}
+        info = {'reward_economy': R_ec}
         return R_ec, info
 
-    def _calculate_urbanity_reward(self, VMT, Alpha, capacity, observation_map):
-        r_drn = 1 if observation_map[7] != 0 else 0
-        r_dg = 1 if Alpha == 1 else (0.5 if observation_map[4] != 0 else 0)
+    def _calculate_urbanity_reward(self, raw_VMT, Alpha, capacity, observation_map):
+        r_drn = 1 if len(observation_map[7][observation_map[7] != 0]) != 0 else 0
+        r_dg = 1 if Alpha == 1 else (0.5 if len(observation_map[7][observation_map[7] != 0]) != 0 else 0)
         r_lu = 1 if observation_map[1, 50, 50] != 0 else 0
-        r_sc = 1 if capacity >= (VMT / 4.56) else 0
+        r_sc = 1 if capacity >= (raw_VMT / 4.56) else 0
         R_u = (r_drn + r_dg + r_lu + r_sc) / 4
         if R_u == 1:
             R_u = 10
@@ -626,24 +701,18 @@ class ChicagoMultiPolicyMapv2(Env):
         if self.time_step == self.max_steps and R_u < 1:
             R_u = -1
 
-        info = {}
+        info = {'reward_urbanity': R_u}
         return R_u, info
 
-    def _calculate_composite_reward(self, VMT, Alpha, capacity, observation_map):
-        R_e, _ = self._calculate_environment_reward(VMT, Alpha)
-        R_ec, _ = self._calculate_economic_reward(VMT, Alpha, capacity)
-        R_u, _ = self._calculate_urbanity_reward(VMT, Alpha, capacity, observation_map)
+    def _calculate_composite_reward(self, raw_VMT, Alpha, capacity, observation_map):
+        R_e, _ = self._calculate_environment_reward(raw_VMT, Alpha, observation_map)
+        R_ec, _ = self._calculate_economic_reward(raw_VMT, Alpha, capacity)
+        R_u, _ = self._calculate_urbanity_reward(raw_VMT, Alpha, capacity, observation_map)
         R = R_e + R_ec + R_u
-        info = {'environment reward': R_e, 'economic reward': R_ec, 'urbanity reward': R_u, 'overall reward': R}
+        info = {'environment reward': R_e, 'economic reward': R_ec, 'urbanity reward': R_u, 'reward_meta': R/3, 'raw_VMT': raw_VMT}
         return R, info
 
-    def _update_environment(self, factor, action_group, VMT_indices, PE_indices, capacity, reward, x, y, env_update):
-        if self.episode == 1:
-            self.action_record_environment = np.hstack(([self.initial_position, np.array([12000])])).reshape(1, -1)
-            self.action_record_economy = np.hstack(([self.initial_position, np.array([12000])])).reshape(1, -1)
-            self.action_record_urbanity = np.hstack(([self.initial_position, np.array([12000])])).reshape(1, -1)
-            self.average_action_record = np.hstack(([self.initial_position, np.array([12000])])).reshape(1, -1)
-            self.meta_action_record = np.hstack(([self.initial_position, np.array([12000])])).reshape(1, -1)
+    def _update_environment(self, factor, action_group, VMT_indices, PE_indices, capacity, reward, x, y, env_update, reward_info):
 
         if reward >= 30 or self.time_step == self.max_steps:
 
@@ -655,40 +724,68 @@ class ChicagoMultiPolicyMapv2(Env):
                 self.time_step += 1
             else:
                 converted_action = np.array([x, y, capacity]).reshape(1, -1)
-                if factor == 'environment':
+                if factor == 'environment' and env_update:
                     self.action_record_environment = np.append(self.action_record_environment, converted_action, axis=0)
-                elif factor == 'economic':
+                    self.reward_environment = np.array([reward_info['reward_environment']])
+                elif factor == 'economic' and env_update:
                     self.action_record_economy = np.append(self.action_record_economy, converted_action, axis=0)
-                elif factor == 'urbanity':
+                    self.reward_economy = np.array([reward_info['reward_economy']])
+                elif factor == 'urbanity' and env_update:
                     self.action_record_urbanity = np.append(self.action_record_urbanity, converted_action, axis=0)
-                else:
-                    average_value = np.array([np.mean(np.array(
-                        [self.action_record_environment[-1], self.action_record_economy[-1],
-                         self.action_record_urbanity[-1]]), axis=0)]).astype(int)
+                    self.reward_urbanity = np.array([reward_info['reward_urbanity']])
+                elif env_update:
+                    self.reward_average = (self.reward_environment + self.reward_economy + self.reward_urbanity) / 3
+                    self.reward_meta = np.array([reward_info['reward_meta']])
+                    meta_converted_action = np.array([
+                        x, y, capacity,
+                        reward_info['environment reward'],
+                        reward_info['economic reward'],
+                        reward_info['urbanity reward'],
+                        self.reward_average.item(), reward_info['reward_meta']
+                    ], dtype=object).reshape(1, -1)
+
+                    average_action_record = np.array([np.mean(np.array([self.action_record_environment[-1], self.action_record_economy[-1],self.action_record_urbanity[-1]]), axis=0)]).astype(int)
+                    average_reward = np.array([
+                        self.reward_environment.item(),
+                        self.reward_economy.item(),
+                        self.reward_urbanity.item(),
+                        self.reward_average.item(),
+                        self.reward_meta.item()
+                    ]).reshape(1,-1)
+                    average_value = np.hstack((average_action_record, average_reward))
                     self.average_action_record = np.append(self.average_action_record, average_value, axis=0)
-                    self.meta_action_record = np.append(self.meta_action_record, converted_action, axis=0)
-                if env_update == True:
+                    self.meta_action_record = np.append(self.meta_action_record, meta_converted_action, axis=0)
+
+                if env_update:
                     self._apply_map_updates(factor, action_group, VMT_indices, PE_indices, capacity, x, y)
+
+                print("Episode {} with action_record_shape {}".format(self.episode, self.average_action_record.shape))
+                np.savetxt("action_record.csv", self.average_action_record, delimiter=",")
+                np.savetxt("out/result/reward/test/" + "meta_action_record.csv", self.meta_action_record,delimiter=",")
+
                 done = True
-                terminate = self.episode + 1 == 5000
+                terminate = self.episode + 1 == 20000
                 self.temp_action_record = np.hstack(([self.initial_position, np.array([12000])]))[np.newaxis, :]
                 self.time_step = 0
+
         else:
             done = False
             terminate = False
             converted_action = np.array([x, y, capacity]).reshape(1, -1)
             self.temp_action_record = np.append(self.temp_action_record, converted_action, axis=0)
             self.time_step += 1
+
         return done, terminate
 
     def _apply_map_updates(self, factor, action_group, VMT_indices, PE_indices, capacity, x, y):
         if factor is None:
             self.main_MAP_[2, x, y] = 0  # vegetation destruction
-            self.main_MAP_[3, x, y] += capacity / 72000
+            self.main_MAP_[3, x, y] += capacity / self.action_converter.capacity() # total capacity
             self._update_demand(action_group, VMT_indices, PE_indices, capacity)
 
     def _update_demand(self, action_group, VMT_indices, PE_indices, capacity):
-        self._update_VMT_demand(action_group, VMT_indices, capacity)
+        if len(VMT_indices) != 0:
+            self._update_VMT_demand(action_group, VMT_indices, capacity)
         if len(PE_indices) != 0:
             self._update_PE_demand(action_group, PE_indices, capacity)
 
@@ -698,18 +795,18 @@ class ChicagoMultiPolicyMapv2(Env):
         remaining_capacity = capacity
 
         x_indices, y_indices = converted_VMT_indices.T
-        vmt_raw_values = self.main_MAP_[5, x_indices, y_indices]
+        vmt_values = self.main_MAP_[5, x_indices, y_indices]
 
-        converted_reductions = self.scalar_VMT_.fit_transform((0.28 * vmt_raw_values).reshape(-1, 1)).flatten()
+        raw_reductions = self.scalar_VMT_.inverse_transform((0.28 * vmt_values).reshape(-1, 1)).flatten()
 
-        for i, (x, y, reduction, c_reduction) in enumerate(
-                zip(x_indices, y_indices, vmt_raw_values, converted_reductions)):
+        for i, (x, y, r_reduction) in enumerate(
+                zip(x_indices, y_indices, raw_reductions)):
             if remaining_capacity <= 0:
                 break
 
-            reduction_amount = min(reduction, remaining_capacity)
+            reduction_amount = min(r_reduction, remaining_capacity)
             remaining_capacity -= reduction_amount
-            self.main_MAP_[5, x, y] -= c_reduction
+            self.main_MAP_[5, x, y] -= self.scalar_VMT_.transform(reduction_amount.reshape(-1,1)).flatten()
 
     def _update_PE_demand(self, action_group, PE_indices, capacity):
 
@@ -717,23 +814,17 @@ class ChicagoMultiPolicyMapv2(Env):
         remaining_capacity = capacity
 
         x_indices, y_indices = converted_PE_indices.T
-        pe_raw_values = self.main_MAP_[6, x_indices, y_indices]
+        pe_values = self.main_MAP_[6, x_indices, y_indices]
 
-        for i, (x, y, reduction) in enumerate(zip(x_indices, y_indices, pe_raw_values)):
+        raw_reductions = self.scalar_PE_.inverse_transform(pe_values.reshape(-1, 1)).flatten()
+
+        for i, (x, y, reduction) in enumerate(zip(x_indices, y_indices, raw_reductions)):
             if remaining_capacity <= 0:
                 break
 
-            remaining_capacity -= reduction
-
-            if remaining_capacity <= 0:
-                updated_value = 1 - self.scalar_PE_.fit_transform(
-                    np.array([abs(remaining_capacity)]).reshape(-1, 1)).flatten()[0]
-
-                self.main_MAP_[6, x, y] = abs(updated_value)
-
-            else:
-
-                self.main_MAP_[6, x, y] = 0
+            reduction_amount = min(reduction, remaining_capacity)
+            remaining_capacity -= reduction_amount
+            self.main_MAP_[6, x, y] -= self.scalar_PE_.transform(reduction_amount.reshape(-1,1)).flatten()
 
     def plot(self, args, rank, meta=False):
         if rank == 0:
@@ -741,20 +832,14 @@ class ChicagoMultiPolicyMapv2(Env):
             x_coords = self.action_record_environment[:, 0]
             y_coords = self.action_record_environment[:, 1]
 
-            x_min, x_max = x_coords.min(), x_coords.max()
-            y_min, y_max = y_coords.min(), y_coords.max()
-
-            heatmap, x_edges, y_edges = np.histogram2d(x_coords, y_coords, bins=[x_max - x_min + 1, y_max - y_min + 1],
-                                                       range=[[x_min, x_max + 1], [y_min, y_max + 1]])
-
             plt.figure(figsize=(6, 8))
-            plt.imshow(heatmap.T, origin='lower', extent=[x_min, x_max + 1, y_min, y_max + 1], cmap='viridis')
-            plt.colorbar(label='Frequency of Selected sites')
+            plt.hexbin(x_coords, y_coords, gridsize=20, cmap='viridis')
+
+            plt.colorbar(label='Point Density of Selected Charging Stations')
             plt.xlabel('Columns Coordinates (Extent X)')
             plt.ylabel('Rows Coordinates (Extent Y)')
-            plt.title('Potential Sites Frequency Map by {} factor in {} community'.format("environment",
+            plt.title('Potential Sites Frequency Map by {} factor in {} community'.format("Environment",
                                                                                           self.select_community))
-            plt.grid(visible=True, which='both', linestyle='--', linewidth=0.5)
             plt.savefig(filename)
 
         elif rank == 1:
@@ -762,20 +847,14 @@ class ChicagoMultiPolicyMapv2(Env):
             x_coords = self.action_record_economy[:, 0]
             y_coords = self.action_record_economy[:, 1]
 
-            x_min, x_max = x_coords.min(), x_coords.max()
-            y_min, y_max = y_coords.min(), y_coords.max()
-
-            heatmap, x_edges, y_edges = np.histogram2d(x_coords, y_coords, bins=[x_max - x_min + 1, y_max - y_min + 1],
-                                                       range=[[x_min, x_max + 1], [y_min, y_max + 1]])
-
             plt.figure(figsize=(6, 8))
-            plt.imshow(heatmap.T, origin='lower', extent=[x_min, x_max + 1, y_min, y_max + 1], cmap='viridis')
-            plt.colorbar(label='Frequency of Selected sites')
+            plt.hexbin(x_coords, y_coords, gridsize=20, cmap='viridis')
+
+            plt.colorbar(label='Point Density of Selected Charging Stations')
             plt.xlabel('Columns Coordinates (Extent X)')
             plt.ylabel('Rows Coordinates (Extent Y)')
-            plt.title(
-                'Potential Sites Frequency Map by {} factor in {} community'.format("economy", self.select_community))
-            plt.grid(visible=True, which='both', linestyle='--', linewidth=0.5)
+            plt.title('Potential Sites Frequency Map by {} factor in {} community'.format("Economy",
+                                                                                          self.select_community))
             plt.savefig(filename)
 
         elif rank == 2:
@@ -783,20 +862,14 @@ class ChicagoMultiPolicyMapv2(Env):
             x_coords = self.action_record_urbanity[:, 0]
             y_coords = self.action_record_urbanity[:, 1]
 
-            x_min, x_max = x_coords.min(), x_coords.max()
-            y_min, y_max = y_coords.min(), y_coords.max()
-
-            heatmap, x_edges, y_edges = np.histogram2d(x_coords, y_coords, bins=[x_max - x_min + 1, y_max - y_min + 1],
-                                                       range=[[x_min, x_max + 1], [y_min, y_max + 1]])
-
             plt.figure(figsize=(6, 8))
-            plt.imshow(heatmap.T, origin='lower', extent=[x_min, x_max + 1, y_min, y_max + 1], cmap='viridis')
-            plt.colorbar(label='Frequency of Selected sites')
+            plt.hexbin(x_coords, y_coords, gridsize=20, cmap='viridis')
+
+            plt.colorbar(label='Point Density of Selected Charging Stations')
             plt.xlabel('Columns Coordinates (Extent X)')
             plt.ylabel('Rows Coordinates (Extent Y)')
-            plt.title(
-                'Potential Sites Frequency Map by {} factor in {} community'.format("urbanity", self.select_community))
-            plt.grid(visible=True, which='both', linestyle='--', linewidth=0.5)
+            plt.title('Potential Sites Frequency Map by {} factor in {} community'.format("Urbanity",
+                                                                                          self.select_community))
             plt.savefig(filename)
 
         if meta == True:
@@ -804,40 +877,28 @@ class ChicagoMultiPolicyMapv2(Env):
             x_coords = self.average_action_record[:, 0]
             y_coords = self.average_action_record[:, 1]
 
-            x_min, x_max = x_coords.min(), x_coords.max()
-            y_min, y_max = y_coords.min(), y_coords.max()
-
-            heatmap, x_edges, y_edges = np.histogram2d(x_coords, y_coords, bins=[x_max - x_min + 1, y_max - y_min + 1],
-                                                       range=[[x_min, x_max + 1], [y_min, y_max + 1]])
-
             plt.figure(figsize=(6, 8))
-            plt.imshow(heatmap.T, origin='lower', extent=[x_min, x_max + 1, y_min, y_max + 1], cmap='viridis')
-            plt.colorbar(label='Frequency of Selected sites')
+            plt.hexbin(x_coords, y_coords, gridsize=20, cmap='viridis')
+
+            plt.colorbar(label='Point Density of Selected Charging Stations')
             plt.xlabel('Columns Coordinates (Extent X)')
             plt.ylabel('Rows Coordinates (Extent Y)')
-            plt.title(
-                'Potential Sites Frequency Map by {} factor in {} community'.format("average", self.select_community))
-            plt.grid(visible=True, which='both', linestyle='--', linewidth=0.5)
+            plt.title('Potential Sites Frequency Map by {} factor in {} community'.format("Average",
+                                                                                          self.select_community))
             plt.savefig(filename)
 
             filename = args.reward_folder + '/test/potential_sites_by_{}_map.png'.format("meta")
             x_coords = self.meta_action_record[:, 0]
             y_coords = self.meta_action_record[:, 1]
 
-            x_min, x_max = x_coords.min(), x_coords.max()
-            y_min, y_max = y_coords.min(), y_coords.max()
-
-            heatmap, x_edges, y_edges = np.histogram2d(x_coords, y_coords, bins=[x_max - x_min + 1, y_max - y_min + 1],
-                                                       range=[[x_min, x_max + 1], [y_min, y_max + 1]])
-
             plt.figure(figsize=(6, 8))
-            plt.imshow(heatmap.T, origin='lower', extent=[x_min, x_max + 1, y_min, y_max + 1], cmap='viridis')
-            plt.colorbar(label='Frequency of Selected sites')
+            plt.hexbin(x_coords, y_coords, gridsize=20, cmap='viridis')
+
+            plt.colorbar(label='Point Density of Selected Charging Stations')
             plt.xlabel('Columns Coordinates (Extent X)')
             plt.ylabel('Rows Coordinates (Extent Y)')
-            plt.title(
-                'Potential Sites Frequency Map by {} factor in {} community'.format("meta", self.select_community))
-            plt.grid(visible=True, which='both', linestyle='--', linewidth=0.5)
+            plt.title('Potential Sites Frequency Map by {} factor in {} community'.format("Meta",
+                                                                                          self.select_community))
             plt.savefig(filename)
 
     def close(self):

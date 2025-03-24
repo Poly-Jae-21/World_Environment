@@ -8,10 +8,13 @@ def softsign(x):
 
 class Action(object):
     def __init__(self, boundary_x, boundary_y):
-        self.max_capacity = 12 ## 12 stalls; 1 stall = 250 kWh = 6 MWh/daily; 12 stalls = 72 MWh/day
+        self.max_capacity = 12 ## 12 stalls; 1 stall = 250 kWh = 6 MWh/daily; 12 stalls = 72 MWh/day (12 -> 36, 216 MWh/day)
         self.min_capacity = 2 ## 2 stalls; 12 MWh/day
         self.boundary_x = boundary_x
         self.boundary_y = boundary_y
+
+    def capacity(self):
+        return self.max_capacity * 6 * 1000
 
     def local_action_converter(self, current_position , next_action):
         """
@@ -21,7 +24,6 @@ class Action(object):
         Next action = not-converted action yet for partial observation
         MAP next action = converted action for MAP from next action
         """
-
         MAP_next_action_x = np.round(softsign(next_action[0])*50)
         MAP_next_action_y = np.round(softsign(next_action[1])*50)
         MAP_next_action = np.array([-MAP_next_action_y, MAP_next_action_x])
