@@ -110,7 +110,7 @@ class ChicagoMultiPolicyMapv2(Env):
         self.capacity_record = [0]
 
         self.probability_list = []  ## This is for the starting point distribution probability. It can be updated over episodes after 32 self.episode
-        self.max_steps = 100
+        self.max_steps = 200
         self.factor = None
         self.service_radius_list = []
 
@@ -382,8 +382,8 @@ class ChicagoMultiPolicyMapv2(Env):
                                                                                                                      -1)
                     self.action_record_economy = np.hstack(([self.initial_position, np.array([12000])])).reshape(1, -1)
                     self.action_record_urbanity = np.hstack(([self.initial_position, np.array([12000])])).reshape(1, -1)
-                    self.average_action_record = np.hstack(([self.initial_position, np.array([12000]),np.array([0]),np.array([0]),np.array([0]),np.array([0]),np.array([0])])).reshape(1, -1)
-                    self.meta_action_record = np.hstack(([self.initial_position, np.array([12000]),np.array([0]),np.array([0]),np.array([0]),np.array([0]),np.array([0])])).reshape(1, -1)
+                    self.average_action_record = np.hstack(([self.initial_position, np.array([12000]),np.array([0]),np.array([0]),np.array([0]),np.array([0]),np.array([0]), np.array([0])])).reshape(1, -1)
+                    self.meta_action_record = np.hstack(([self.initial_position, np.array([12000]),np.array([0]),np.array([0]),np.array([0]),np.array([0]),np.array([0]), np.array([0])])).reshape(1, -1)
 
                 return self.step(start_action)[0], info
             else:
@@ -598,7 +598,7 @@ class ChicagoMultiPolicyMapv2(Env):
             elif self.factor is None:
                 self.reward_average = (self.reward_environment + self.reward_economy + self.reward_urbanity) / 3
                 self.reward_meta = np.array([-1])
-                meta_converted_action = np.array([x, y, capacity,-1,-1,-1,-1,-1]).reshape(1, -1)
+                meta_converted_action = np.array([x, y, capacity,-1,-1,-1,-1,-1, self.select_community]).reshape(1, -1)
 
                 average_action_record = np.array([np.mean(np.array(
                     [self.action_record_environment[-1], self.action_record_economy[-1],
@@ -608,7 +608,8 @@ class ChicagoMultiPolicyMapv2(Env):
                     self.reward_economy.item(),
                     self.reward_urbanity.item(),
                     self.reward_average.item(),
-                    self.reward_meta.item()
+                    self.reward_meta.item(),
+                    self.select_community
                 ]).reshape(1, -1)
                 average_value = np.hstack((average_action_record, average_reward))
 
@@ -741,7 +742,7 @@ class ChicagoMultiPolicyMapv2(Env):
                         reward_info['environment reward'],
                         reward_info['economic reward'],
                         reward_info['urbanity reward'],
-                        self.reward_average.item(), reward_info['reward_meta']
+                        self.reward_average.item(), reward_info['reward_meta'], self.select_community
                     ], dtype=object).reshape(1, -1)
 
                     average_action_record = np.array([np.mean(np.array([self.action_record_environment[-1], self.action_record_economy[-1],self.action_record_urbanity[-1]]), axis=0)]).astype(int)
@@ -750,7 +751,8 @@ class ChicagoMultiPolicyMapv2(Env):
                         self.reward_economy.item(),
                         self.reward_urbanity.item(),
                         self.reward_average.item(),
-                        self.reward_meta.item()
+                        self.reward_meta.item(),
+                        self.select_community
                     ]).reshape(1,-1)
                     average_value = np.hstack((average_action_record, average_reward))
                     self.average_action_record = np.append(self.average_action_record, average_value, axis=0)
@@ -759,7 +761,6 @@ class ChicagoMultiPolicyMapv2(Env):
                 if env_update:
                     self._apply_map_updates(factor, action_group, VMT_indices, PE_indices, capacity, x, y)
 
-                print("Episode {} with action_record_shape {}".format(self.episode, self.average_action_record.shape))
                 np.savetxt("action_record.csv", self.average_action_record, delimiter=",")
                 np.savetxt("out/result/reward/test/" + "meta_action_record.csv", self.meta_action_record,delimiter=",")
 
@@ -900,6 +901,7 @@ class ChicagoMultiPolicyMapv2(Env):
             plt.title('Potential Sites Frequency Map by {} factor in {} community'.format("Meta",
                                                                                           self.select_community))
             plt.savefig(filename)
+        plt.close()
 
     def close(self):
         pygame.quit()
