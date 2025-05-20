@@ -1,6 +1,7 @@
 import rasterio
 from rasterio.features import rasterize
 import numpy as np
+import math
 
 class Polygon_to_matrix():
     def __init__(self):
@@ -175,7 +176,7 @@ class Polygon_to_matrix():
         csv_path = 'env/utils/output_matrix_v5.csv'
         np.savetxt(csv_path, numpy_array, delimiter=",", fmt='%d')
 
-class Density:
+class Density():
     def __init__(self, centroid_x, centroid_y):
         self.c = np.array([[x_val, y_val] for x_val, y_val in zip(centroid_x, centroid_y)])
         self.len_x = len(centroid_x)
@@ -190,22 +191,23 @@ class Density:
 
         return radius
 
-    def KernelDensity(self, radius, map_):
-        densities = []
+    def KernelDensity(self, radius, sub_map):
+        densitys = []
+        gaussian_kernels = []
+        for i in range(len(self.c)):
+            gaussian_kernels = []
+            action_records = np.argwhere(sub_map[3] != 0)
+            for j in range(len(action_records)):
+                dist_i_j = np.linalg.norm(self.c[i] - action_records[j])
+                if dist_i_j <= radius:
+                    ii = 1
+                    gaussian_kernel = (1 / np.roots((2 * np.pi))) * (-1)**(-ii)*(1-(dist_i_j / radius)**2)**2
+                    gaussian_kernels.append(gaussian_kernel)
+                else:
+                    ii = 0
+                    gaussian_kernel =0
 
-        action_records = np.argwhere(map_[3] != 0)
+            density_i = (1 / radius ** 2) * np.sum(gaussian_kernels)
+            densitys.append(density_i)
 
-        for point in self.c:
-            distances = np.linalg.norm(action_records - point, axis=1)
-
-            within_radius = distances < radius
-
-            gaussian_kernels = (1 / np.sqrt(2 * np.pi)) * np.exp(-0.5 * (distances[within_radius] / radius)**2)
-
-            density = (1 / radius ** 2) * np.sum(gaussian_kernels)
-
-            densities.append(density)
-
-        return densities
-
-
+        return densitys

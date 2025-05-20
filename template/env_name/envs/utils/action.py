@@ -24,15 +24,24 @@ class Action(object):
         Next action = not-converted action yet for partial observation
         MAP next action = converted action for MAP from next action
         """
+
+        """
         MAP_next_action_x = np.round(softsign(next_action[0])*50)
         MAP_next_action_y = np.round(softsign(next_action[1])*50)
-        MAP_next_action = np.array([-MAP_next_action_y, MAP_next_action_x])
+        original_next_capacity = 6000 * (softsign(next_action[2]) * (self.max_capacity-self.min_capacity)/2 + (self.max_capacity+self.min_capacity)/2) ## next_action[0][2] = 0 ~ 1 ex) if 0.1 -> stalls =3
+        """
+        MAP_next_action = self.Action_adapter(next_action)
+        MAP_next_action = np.array([-MAP_next_action[1], MAP_next_action[0]])
         MAP_next_position = (current_position + MAP_next_action).astype('int32')
 
-        original_next_capacity = 6000 * (softsign(next_action[2]) * (self.max_capacity-self.min_capacity)/2 + (self.max_capacity+self.min_capacity)/2) ## next_action[0][2] = 0 ~ 1 ex) if 0.1 -> stalls =3
+        original_next_capacity = 6000 * (self.min_capacity + (next_action[2] * (self.max_capacity - self.min_capacity)))
         MAP_next_action = np.concatenate((MAP_next_position, np.array([original_next_capacity]))) # MAP_next_action -> current_action in next step
 
         return MAP_next_action
+
+    def Action_adapter(self, a):
+        # it is to convert the range [0, 1] of position actions into [-50, 50]
+        return 2 * (a - 0.5) * 50
 
     def action_converter(self, action, position_record, action_record):
         boundary_x, boundary_y = self.boundary_x, self.boundary_y
