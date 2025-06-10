@@ -396,7 +396,7 @@ class ChicagoMultiPolicyMapv2(Env):
                 self.initial_position = selected_initial_starting_point
                 self.temp_action_record = np.hstack(([self.initial_position, np.array([12000])]))[np.newaxis, :]
 
-                start_action = (self.temp_action_record.squeeze(), "reset", False, True)
+                start_action = (self.temp_action_record.squeeze(), "reset", False, True, False)
 
                 info = {"community": self.select_community, "initial_position": self.initial_position.tolist()}
 
@@ -444,7 +444,7 @@ class ChicagoMultiPolicyMapv2(Env):
                     self.temp_action_record = np.hstack((self.initial_position, np.array([12000])))[np.newaxis, :]
                     info = {"community": selected_community, "initial_position": self.initial_position.tolist()}
 
-                    start_action = (self.temp_action_record.squeeze(), "reset", False, True)
+                    start_action = (self.temp_action_record.squeeze(), "reset", False, True, False)
 
                     return self.step(start_action)[0], info
                 else:
@@ -465,11 +465,16 @@ class ChicagoMultiPolicyMapv2(Env):
 
         action = action_with_factor[0]
 
+        if self.time_step == 1:
+            done = False
+
         self.factor = action_with_factor[1]
 
         env_update = action_with_factor[2]
 
         reset_step = action_with_factor[3]
+
+        save_result = action_with_factor[4]
 
         ### self.time_step != 0 and reset_step == False -> action is from output in the training model, and thus it should be needed to convert into the extent. On the other hand, action does not need to convert into real extent.
         if not reset_step:
@@ -480,7 +485,7 @@ class ChicagoMultiPolicyMapv2(Env):
         action_group = converted_action[0:2].astype(int)
         x, y, capacity = converted_action[0].astype(int), converted_action[1].astype(int), converted_action[2].astype(int)
 
-        self.converted_action = self.conversion_into_extent(np.array([x, y, capacity]).reshape(1, -1)) # [Rows, Columns, Capacity]
+        self.converted_action_a = self.conversion_into_extent(np.array([x, y, capacity]).reshape(1, -1)) # [Rows, Columns, Capacity]
 
         next_observation = generate_partial_observation(action_group, self.main_MAP_)
 
@@ -542,12 +547,13 @@ class ChicagoMultiPolicyMapv2(Env):
 
 
         if len(VMT_indices) == 0 or int(self.main_MAP_[0,x,y]) is not self.select_community:
-            return self._handle_invalid_action(next_observation, self.next_state, reset_step, action_group, capacity, x, y, VMT_indices, PE_indices, raw_VMT)
+            return self._handle_invalid_action(next_observation, self.next_state, reset_step, action_group, capacity, x, y, VMT_indices, PE_indices, raw_VMT, save_result)
 
-        r, info = self._calculate_reward(self.factor, raw_VMT, raw_PE, Alpha, capacity, next_observation)
-        done, terminate = self._update_environment(self.factor, action_group, VMT_indices, PE_indices, capacity, r, x, y, env_update, info)
+        else:
+            r, info = self._calculate_reward(self.factor, raw_VMT, raw_PE, Alpha, capacity, next_observation)
+            done, terminate = self._update_environment(self.factor, action_group, VMT_indices, PE_indices, capacity, r, x, y, env_update, info, save_result)
 
-        return np.array(self.next_state, dtype=np.float32), r, done, terminate, info
+            return np.array(self.next_state, dtype=np.float32), r, done, terminate, info
 
     def render(self):
         if self.render_mode == "human":
@@ -620,7 +626,11 @@ class ChicagoMultiPolicyMapv2(Env):
         return total_indices, np.array(total_values).reshape(-1, 1), np.array(Inverse_total_values).reshape(-1,
                                                                                                             1), value, Inverse_value
 
-    def _handle_invalid_action(self, next_observation, next_state, reset_step, action_group, capacity, x, y, VMT_indices, PE_indices, raw_VMT):
+    def _handle_invalid_action(self, next_observation, next_state, reset_step, action_group, capacity, x, y, VMT_indices, PE_indices, raw_VMT, save_result):
+
+        if self.time_step == 1:
+            done = False
+
         if self.time_step == self.max_steps:
             done = True
         else:
@@ -641,7 +651,8 @@ class ChicagoMultiPolicyMapv2(Env):
                 self.reward_environment = np.array([-6, self.select_community]).reshape(1, -1)
                 trajectory_environment = np.hstack((raw_converted_action, self.reward_environment))
                 self.action_record_environment = np.append(self.action_record_environment, trajectory_environment, axis=0)
-                np.savetxt("out/result/reward/test/" + "environment_action.csv", self.action_record_environment,delimiter=",", header="x,y,capacity,reward,community_label")
+                if save_result:
+                    np.savetxt("out/result/reward/test/" + "environment_action.csv", self.action_record_environment,delimiter=",", header="x,y,capacity,reward,community_label")
 
             elif self.factor == 'economic':
                 self.total_reward -= 6
@@ -649,7 +660,8 @@ class ChicagoMultiPolicyMapv2(Env):
                 self.reward_economy = np.array([-6, self.select_community]).reshape(1, -1)
                 trajectory_economy = np.hstack((raw_converted_action, self.reward_economy))
                 self.action_record_economy = np.append(self.action_record_economy, trajectory_economy, axis=0)
-                np.savetxt("out/result/reward/test/" + "economy_action.csv", self.action_record_economy,delimiter=",", header="x,y,capacity,reward,community_label")
+                if save_result:
+                    np.savetxt("out/result/reward/test/" + "economy_action.csv", self.action_record_economy,delimiter=",", header="x,y,capacity,reward,community_label")
 
             elif self.factor == 'urbanity':
                 self.total_reward -= 6
@@ -657,7 +669,8 @@ class ChicagoMultiPolicyMapv2(Env):
                 self.reward_urbanity = np.array([-6, self.select_community]).reshape(1, -1)
                 trajectory_urbanity = np.hstack((raw_converted_action, self.reward_urbanity))
                 self.action_record_urbanity = np.append(self.action_record_urbanity, trajectory_urbanity, axis=0)
-                np.savetxt("out/result/reward/test/" + "urbanity_action.csv", self.action_record_urbanity,delimiter=",", header="x,y,capacity,reward,community_label")
+                if save_result:
+                    np.savetxt("out/result/reward/test/" + "urbanity_action.csv", self.action_record_urbanity,delimiter=",", header="x,y,capacity,reward,community_label")
 
             elif self.factor == 'overall':
                 self.total_reward -= 6
@@ -665,7 +678,8 @@ class ChicagoMultiPolicyMapv2(Env):
                 self.reward_overall = np.array([-6,-6,-6,self.total_reward,self.total_reward/self.time_step, self.select_community]).reshape(1, -1)
                 trajectory_overall = np.hstack((raw_converted_action, self.reward_overall))
                 self.action_record_overall = np.append(self.action_record_overall, trajectory_overall, axis=0)
-                np.savetxt("out/result/reward/test/" + "overall_action.csv", self.action_record_overall,delimiter=",", header="x,y,capacity,en_reward, eco_reward, urb_reward, total_reward, avr_reward, community_label")
+                if save_result:
+                    np.savetxt("out/result/reward/test/" + "overall_action.csv", self.action_record_overall,delimiter=",", header="x,y,capacity,en_reward, eco_reward, urb_reward, total_reward, avr_reward, community_label")
 
             elif self.factor == 'system':
                 self.total_reward -= 6
@@ -673,7 +687,8 @@ class ChicagoMultiPolicyMapv2(Env):
                 self.reward_system = np.array([-6,-6,-6,self.total_reward,self.total_reward/self.time_step, self.select_community]).reshape(1, -1)
                 trajectory_system = np.hstack((raw_converted_action, self.reward_system))
                 self.action_record_system = np.append(self.action_record_system, trajectory_system, axis=0)
-                np.savetxt("out/result/reward/test/" + "system_action.csv", self.action_record_system, delimiter=",", header="x,y,capacity,en_reward, eco_reward, urb_reward, total_reward, avr_reward, community_label")
+                if save_result:
+                    np.savetxt("out/result/reward/test/" + "system_action.csv", self.action_record_system, delimiter=",", header="x,y,capacity,en_reward, eco_reward, urb_reward, total_reward, avr_reward, community_label")
 
 
                 '''
@@ -697,8 +712,12 @@ class ChicagoMultiPolicyMapv2(Env):
                 self.meta_action_record = np.append(self.meta_action_record, meta_converted_action, axis=0)
                 '''
 
+            '''
             if int(next_observation[0,50,50]) == int(self.select_community):
                 self._apply_map_updates(self.factor, action_group, VMT_indices, PE_indices, capacity, x, y)
+            '''
+
+
 
             self.temp_action_record = np.hstack(([self.initial_position, np.array([12000])]))[np.newaxis, :]
             self.time_step = 1
@@ -764,7 +783,7 @@ class ChicagoMultiPolicyMapv2(Env):
 
     def _calculate_economic_reward(self, raw_VMT, Alpha, capacity):
         z = round(capacity / 6000) if capacity > 0 else 0
-        F_z = z * (20600*0.8 + 800)
+        F_z = z * (20600*0.8 + 800*12)
         P_G = (Alpha * (0.28 - 0.06) + (1 - Alpha) * (0.28 - 0.0405)) * raw_VMT * 365 / (4.56*5)
         ### commercial electricity rate (Chicago): 0.0405$/kwh, Supercharger cost (0.2~0.6): 0.28$/kwh, PV electricity rate(SolarReviews): 0.06$/kwh
         R_eck = P_G * 12 / F_z
@@ -817,11 +836,15 @@ class ChicagoMultiPolicyMapv2(Env):
         info = {'environment reward': R_e, 'economic reward': R_ec, 'urbanity reward': R_u, 'total reward': self.total_reward, 'average_reward': self.total_reward/self.time_step, 'raw_VMT': raw_VMT}
         return R, info
 
-    def _update_environment(self, factor, action_group, VMT_indices, PE_indices, capacity, reward, x, y, env_update, reward_info):
+    def _update_environment(self, factor, action_group, VMT_indices, PE_indices, capacity, reward, x, y, env_update, reward_info, save_result):
+
+        if self.time_step == 1:
+            done = False
+
 
         if reward >= 10 or self.time_step == self.max_steps:
 
-            if self.time_step < 10:
+            if self.time_step < 11:
                 done = False
                 terminate = False
                 converted_action = np.array([x, y, capacity]).reshape(1, -1)
@@ -836,31 +859,36 @@ class ChicagoMultiPolicyMapv2(Env):
                     self.reward_environment = np.array([reward_info['reward_environment'], self.select_community]).reshape(1, -1)
                     trajectory_environment = np.hstack((raw_converted_action, self.reward_environment))
                     self.action_record_environment = np.append(self.action_record_environment, trajectory_environment, axis=0)
-                    np.savetxt("out/result/reward/test/" + "environment_action.csv", self.action_record_environment,delimiter=",", header="x,y,capacity,reward,community_label")
+                    if save_result:
+                        np.savetxt("out/result/reward/test/" + "environment_action.csv", self.action_record_environment,delimiter=",", header="x,y,capacity,reward,community_label")
 
                 elif factor == 'economic':
                     self.reward_economy = np.array([reward_info['reward_economy'], self.select_community]).reshape(1, -1)
                     trajectory_economy = np.hstack((raw_converted_action, self.reward_economy))
                     self.action_record_economy = np.append(self.action_record_economy, trajectory_economy,axis=0)
-                    np.savetxt("out/result/reward/test/" + "economy_action.csv", self.action_record_economy,delimiter=",", header="x,y,capacity,reward,community_label")
+                    if save_result:
+                        np.savetxt("out/result/reward/test/" + "economy_action.csv", self.action_record_economy,delimiter=",", header="x,y,capacity,reward,community_label")
 
                 elif factor == 'urbanity':
                     self.reward_urbanity = np.array([reward_info['reward_urbanity'], self.select_community]).reshape(1, -1)
                     trajectory_urbanity = np.hstack((raw_converted_action, self.reward_urbanity))
                     self.action_record_urbanity = np.append(self.action_record_urbanity, trajectory_urbanity, axis=0)
-                    np.savetxt("out/result/reward/test/" + "urbanity_action.csv", self.action_record_urbanity,delimiter=",", header="x,y,capacity,reward,community_label")
+                    if save_result:
+                        np.savetxt("out/result/reward/test/" + "urbanity_action.csv", self.action_record_urbanity,delimiter=",", header="x,y,capacity,reward,community_label")
 
                 elif factor == "overall":
                     self.reward_overall = np.array([reward_info['environment reward'], reward_info['economic reward'], reward_info['urbanity reward'], reward_info['total reward'], reward_info['average_reward'], self.select_community]).reshape(1, -1)
                     trajectory_overall = np.hstack((raw_converted_action, self.reward_overall))
                     self.action_record_overall = np.append(self.action_record_overall, trajectory_overall, axis=0)
-                    np.savetxt("out/result/reward/test/" + "overall_action.csv", self.action_record_overall,delimiter=",", header="x,y,capacity,en_reward, eco_reward, urb_reward, total_reward, avr_reward, community_label")
+                    if save_result:
+                        np.savetxt("out/result/reward/test/" + "overall_action.csv", self.action_record_overall,delimiter=",", header="x,y,capacity,en_reward, eco_reward, urb_reward, total_reward, avr_reward, community_label")
 
                 elif factor == "system":
                     self.reward_system = np.array([reward_info['environment reward'], reward_info['economic reward'], reward_info['urbanity reward'], reward_info['total reward'], reward_info['average_reward'], self.select_community]).reshape(1, -1)
                     trajectory_system = np.hstack((raw_converted_action, self.reward_system))
                     self.action_record_system = np.append(self.action_record_system, trajectory_system, axis=0)
-                    np.savetxt("out/result/reward/test/" + "system_action.csv", self.action_record_system,delimiter=",",header="x,y,capacity,en_reward, eco_reward, urb_reward, total_reward, avr_reward, community_label")
+                    if save_result:
+                        np.savetxt("out/result/reward/test/" + "system_action.csv", self.action_record_system,delimiter=",",header="x,y,capacity,en_reward, eco_reward, urb_reward, total_reward, avr_reward, community_label")
 
                     '''
                     self.reward_average = (self.reward_environment + self.reward_economy + self.reward_urbanity) / 3
